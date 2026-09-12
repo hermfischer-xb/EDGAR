@@ -9,8 +9,6 @@ from arelle.FileSource import openFileStream, openFileSource, saveFile # only ne
 from arelle.ModelValue import qname, dateTime, DATE
 from arelle import XbrlConst, UrlUtil
 from arelle.PythonUtil import attrdict, flattenSequence, pyObjectSize, OrderedSet
-from arelle.ValidateXbrlCalcs import inferredDecimals, floatINF
-from arelle.XmlValidateConst import VALID
 from .Consts import standardNamespacesPattern, latestTaxonomyDocs, latestEntireUgt, attachmentDocumentTypeValidationRulesFiles, feeTaggingAttachmentDocumentTypePattern
 
 EMPTY_DICT = {}
@@ -59,10 +57,13 @@ def usgaapYear(modelXbrl):
 
 
 def loadNonNegativeFacts(modelXbrl, dqcRules, ugtRels):
-    # for us-gaap newer than 2020 use DQCRT non-negative facts.
-    if dqcRules and ugtRels: # not used for us-gaap before 2020
+    # DQCRT provides the non-negative rules for us-gaap filings; dqcRules and ugtRels are
+    # both empty for any filing that is not us-gaap (see loadDqcRules).
+    if dqcRules and ugtRels:
         return None # use all available DQCRT tests
-    # for us-gaap < 2020 use EFM non-negative warning  instead of DQCRT rules
+    # IFRS and other non-us-gaap filings instead use the EFM non-negative warnings in
+    # signwarnings.json, because EDGAR applies the DQC rule implementations to us-gaap only
+    # and has not adopted the DQC IFRS rules.
     _file = openFileStream(modelXbrl.modelManager.cntlr, resourcesFilePath(modelXbrl.modelManager, "signwarnings.json"), 'rt', encoding='utf-8')
     signwarnings = json.load(_file) # {localName: date, ...}
     _file.close()
@@ -668,19 +669,6 @@ def buildUgtFullRelsFiles(modelXbrl, dqcRules):
 
     modelManager.validateDisclosureSystem = priorValidateDisclosureSystem
 
-def axisMemQnames(modelXbrl, axisQname, baseTaxonomyOnly=False):
-    memQnames = set()
-    for dimDomRel in modelXbrl.relationshipSet(XbrlConst.dimensionDomain).fromModelObject(modelXbrl.qnameConcepts[axisQname]):
-        addDomMems(dimDomRel, memQnames, False, baseTaxonomyOnly)
-    return memQnames
-
-def memChildQnames(modelXbrl, memName):
-    memQnames = set()
-    for memConcept in modelXbrl.nameConcepts.get(memName,()):
-        for memMemRel in modelXbrl.relationshipSet(XbrlConst.domainMember).fromModelObject(memConcept):
-            addDomMems(memMemRel, memQnames)
-    return memQnames
-
 def loadDqcRules(modelXbrl): # returns match expression, standard patterns
     # determine taxonomy usage by facts, must have more us-gaap facts than ifrs facts
     # (some ifrs filings may have a few us-gaap facts or us-gaap concepts loaded but are not us-gaap filings)
@@ -703,118 +691,8 @@ def loadDqcRules(modelXbrl): # returns match expression, standard patterns
         _file = openFileStream(modelXbrl.modelManager.cntlr, resourcesFilePath(modelXbrl.modelManager, "dqc-us-rules.json"), 'rt', encoding='utf-8')
         dqcRules = json.load(_file, object_pairs_hook=OrderedDict) # preserve order of keys
         _file.close()
-        if usGaapYr >= "2020": # files only exist starting with 2023, e.g. 2020 must use 2023 constants file
-            dqcRules["XULE-constants-file"] = resourcesFilePath(modelXbrl.modelManager, "xule", f"dqcrt-us-{max(usGaapYr,'2023')}-constants.json")
         return dqcRules
     return {}
-
-def xuleReloadConstValue(obj, elt_type=None):
-    # this method reproduces XuleConstant.py method reload_value
-    if obj is None:
-        return None
-    elif isinstance(obj, str):
-        if elt_type == 'qname':
-            return qname(obj) # obj is a clark name
-        elif elt_type == 'decimal':
-            return Decimal(obj)
-        return str(obj) # should be a string
-    elif isinstance(obj, (float, int)):
-        return obj
-    elif isinstance(obj, list):
-        _type = obj[0]
-        if _type == "decimal" and len(obj) == 2:
-            return Decimal(obj[1])
-        elif _type == "qname" and len(obj) == 2:
-            return qname(obj[1])
-        elif _type == "network":
-            return tuple(obj[1:-1])
-        elif _type == "reference":
-            # this is not usable, value is ModelReference which would require a PrototypeDtsObject.py PrototypeObject to be implemented
-            return tuple(obj[1:-1])
-        elif _type == 'dictionary':
-            values = []
-            for item in obj[1:]:
-                values.append( tuple(xuleReloadConstValue(elt, None) for elt in item) )
-            return dict(values)
-        else:
-            collection_elt_type = _type.split()
-            collection_type = collection_elt_type[0]
-            if collection_type in ('set', 'list'):
-                try:
-                    elt_type = _type.split()[1]
-                except IndexError:
-                    elt_type = None
-                values = []
-                for elt in obj[1:]:
-                    values.append( xuleReloadConstValue(elt, elt_type) )
-                if collection_type == "set":
-                    return frozenset(values)
-                else:
-                    return tuple(values)    
-
-def loadXuleConstantsForPythonRules(val, dqcRules):
-    xuleConsts = {}
-    if "XULE-constants-file" in dqcRules:
-        # reload XULE constants built for XULE rule operaition
-        _file = openFileStream(val.modelXbrl.modelManager.cntlr, dqcRules["XULE-constants-file"], 'rt', encoding='utf-8')
-        xuleReloadableConstants = json.load(_file)
-        _file.close()
-        for name, obj in xuleReloadableConstants.items():
-            xuleConsts[name] = xuleReloadConstValue(obj)
-    return xuleConsts
-    
-
-def factBindings(modelXbrl, localNames, nils=False, factFilter=None, noAdditionalDims=False, coverPeriod=False, coverDimQnames=EMPTY_SET, coverDimNames=EMPTY_SET, absentDimNames=EMPTY_SET, alignDims=None, coverUnit=False, cube=None, cubeRelSet=None):
-    bindings = defaultdict(dict)
-    def addMostAccurateFactToBinding(f):
-        cntx = f.context
-        if (f.xValid >= VALID
-            and (nils or not f.isNil)
-            and (factFilter(f) if factFilter is not None else True)
-            and cntx is not None
-            and (not noAdditionalDims or not (cntx.qnameDims.keys() - coverDimQnames))
-            and (not absentDimNames or not any(k.localName in absentDimNames for k in cntx.qnameDims.keys()))):
-            if cubeRelSet:
-                if not all(cubeRelSet.isRelated(cube, "descendant", dim.member, isDRS=True) for dim in cntx.qnameDims.values()):
-                    return
-            if alignDims:
-                h = hash( (cntx.periodHash if not coverPeriod else None, frozenset(hash(dim) for qn,dim in cntx.qnameDims.items() if qn in alignDims)) )
-            elif coverPeriod:
-                h = cntx.dimsHash
-                hper = cntx.periodHash
-            elif coverDimQnames or coverDimNames:
-                h = hash( (cntx.periodHash, frozenset(dim for qn,dim in cntx.qnameDims.items() if qn not in coverDimQnames and qn.localName not in coverDimNames)) )
-                hCvrDims = hash( frozenset(dim for qn,dim in cntx.qnameDims.items() if qn in coverDimQnames) )
-            else:
-                h = cntx.contextDimAwareHash
-            binding = bindings[h, f.unit.hash if (f.unit is not None and not coverUnit) else None]
-            ln = f.qname.localName
-            if coverPeriod and not alignDims:
-                if ln not in binding:
-                    binding[ln] = defaultdict(dict)
-                if hper not in binding[ln] or inferredDecimals(f) > inferredDecimals(binding[ln][hper]):
-                    binding[ln][hper] = f
-            elif coverDimQnames or coverDimNames:
-                if ln not in binding:
-                    binding[ln] = defaultdict(dict)
-                if hCvrDims not in binding[ln] or inferredDecimals(f) > inferredDecimals(binding[ln][hCvrDims]):
-                    binding[ln][hCvrDims] = f
-            else:
-                if ln not in binding or inferredDecimals(f) > inferredDecimals(binding[ln]):
-                    binding[ln] = f
-    for ln in localNames:
-        for f in modelXbrl.factsByLocalName.get(ln,()):
-            addMostAccurateFactToBinding(f)
-    return bindings
-
-def leastDecimals(binding, localNames=None):
-    if localNames:
-        nonNilFacts = [binding[ln] for ln in localNames if not binding[ln].isNil]
-    else:
-        nonNilFacts = [f for f in binding if f is not None and not f.isNil] # just plain sequence of facts not in bindings
-    if nonNilFacts:
-        return min((inferredDecimals(f) for f in nonNilFacts))
-    return floatINF
 
 def buildFTValidationsFile(cntlr):
     from .FtValidations import FtValidations

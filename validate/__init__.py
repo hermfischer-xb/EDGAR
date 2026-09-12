@@ -46,22 +46,25 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "filerNewRegistrantFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
    # Test/debug fields
    datetimeForTesting: xml-syntax datetime to override clock time for test/debug purposes
-   dqcRuleFilter: null or absent for all Python-implemented DQC rules for us-gaap pre-2025, else for the DQCRT subset of XULE rules,
-       if not null, for Python implemented DQC rules, a regular expression to filter which rules run
-       (e.g. "DQC.US.00(04|15)" ), but not including the id suffix (which is not filterable)
+   dqcRuleFilter: null or absent to run the DQCRT subset of DQC rules (the default).
+       DQC rules are implemented by XULE only.  The hand-coded Python implementations of these rules
+       were removed; they ran only for us-gaap taxonomy years before the XULE cutover year, which
+       EDGAR no longer accepts.  A rule-name regular expression in this parameter therefore no longer
+       selects which rules run; use Xule's --xule-run-only or --xule-run-only-pattern for that.
 
        If parameter is absent and config.xml for disclosureSystem options specifies a dqc-rule-filter, it will be in effect.
 
-       For XULE implementations XULE:yyyy specifies to run XULE for taxonomies beginning with year yyyy (default 2025).
-       E.g. "XULE:2026|DQC.US.00(04|15)" would specify running XULE-implemented validation for 2026 or later US-GAAP else
-       run only the python-implmented rules DQC.US.0004 and DQC.US.0015.  Or to block XULE and match all Python-coded rules "XULE:9999|.*"
+       XULE:yyyy specifies to run XULE for us-gaap taxonomies of year yyyy or later (default 2025).
+       E.g. "XULE:2024|.*" runs XULE-implemented validation for us-gaap 2024 or later.  Specifying a year
+       later than the filing's us-gaap year (e.g. "XULE:9999") blocks XULE, and with no Python
+       implementation remaining that results in no DQC validation at all.
        When running XULE-implemented rules the following additional entries activate XULE features
            XULE_RUN_ALL - instead of DQCRT subset of DQC rules, run the full set.  (Xule --xule-run-only and --xule-run-only-pattern override this, if provided)
            XULE_time:secs - print xule rule run times for rules > 1 sec on stdout (Xule --xule-time overrides this)
            XULE_debug - print xule debug on stdout (Xule --xule-debug overrides this)
            XULE_trace - print xule trace on stdout (Xule --xule-trace overrides this)
 
-           e.g. XULE:2023|XULE_time:.5|XULE_debug|.* to run XULE after 2023 with timings over 1/2 sec and debug to stdout, else all python-coded rules
+           e.g. XULE:2023|XULE_time:.5|XULE_debug|.* to run XULE for us-gaap 2023 or later with timings over 1/2 sec and debug to stdout
    # fee table instance validations (only):
    "attachmentDocumentType": "EX-FILINGS FEES",  # this field is mandatory for fee table instance validations else instance will be validated as a financial report
    # attachmentDocumentType must match an entry in feeTaggingExhibitTypes (Consts.py) for instance to be recognized as a fee table instance
