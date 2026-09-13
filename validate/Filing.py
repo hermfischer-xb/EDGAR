@@ -155,6 +155,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     val.fileNameDate = None
     val.entityRegistrantName = None
     val.requiredContext = None
+    val.reportingPeriodContext = None # EXG 3.1 condition 3.b context; differs from requiredContext under 3.c
     deiDocumentType = None # needed for non-instance validation too
     # efmSubmissionType and efmIxdsType are already set when re-validating after redaction/redline removal
     submissionType = getattr(modelXbrl,'efmSubmissionType', val.params.get("submissionType", ""))
@@ -456,6 +457,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
         documentPeriodEndDateFact = None
         documentTypeFact = None
         documentTypeFactContextID = None
+        deiFilerIdentifierFact = None # only assigned when an undimensioned context holds the fact
+        deiFilerNameFact = None
         deiItems = {}
         deiFacts = {}
         def hasDeiFact(deiName):
@@ -542,9 +545,6 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                         elif factElementName in deiCheckLocalNames:
                             deiItems[factElementName] = value
                             deiFacts[factElementName] = f
-                            if (val.requiredContext is None and context.isStartEndPeriod and
-                                context.startDatetime is not None and context.endDatetime is not None):
-                                val.requiredContext = context
                 else:
                     # segment present
                     isEntityCommonStockSharesOutstanding = factElementName == "EntityCommonStockSharesOutstanding"
@@ -799,23 +799,47 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             del durationCntxStartDatetimes
             val.modelXbrl.profileActivity("... filer instant-duration checks", minTimeToShow=1.0)
 
-        #6.5.19 required context
-        #for c in sorted(candidateRequiredContexts, key=lambda c: (c.endDatetime, c.endDatetime-c.startDatetime), reverse=True):
-        #    val.requiredContext = c
-        #    break # longest duration is first
-
-        # pre-16.1 code to accept any duration period as start-end (per WH/HF e-mails 2016-03-13)
-        if val.requiredContext is None: # possibly there is no document period end date with matching context
+        #6.5.19 required context, per EDGAR XBRL Guide (EXG) 3.1
+        # The reporting period end is the periodOfReport parameter when EDGAR supplies it, else the
+        # dei:DocumentPeriodEndDate fact.  Only EDGAR (or a caller passing the filingDate parameter)
+        # knows the intended date of submission, so EXG condition 3.c is unavailable, not guessed,
+        # for a filing being prepared or examined after dissemination.
+        filingDateParam = edgarDateParamValue(val.params.get("filingDate"))
+        reportingPeriodEnd = edgarDateParamValue(val.params.get("periodOfReport")) or (
+            str(documentPeriodEndDate) if documentPeriodEndDate else None)
+        val.requiredContext, requiredContextCondition = selectRequiredContext(
+            contexts, val.params.get("cik") or entityIdentifierValue,
+            reportingPeriodEnd, filingDateParam,
+            (deiFilerIdentifierFact, documentTypeFact, deiFilerNameFact, documentPeriodEndDateFact,
+             amendmentFlagFact))
+        # PreCalAlignment and the EXG 3.2.6 required context period checks need the reporting period
+        # rather than the required context, which under condition 3.c is a one day duration ending on
+        # the filing date.
+        val.reportingPeriodContext = val.requiredContext
+        if requiredContextCondition == "3.c" and reportingPeriodEnd:
             for c in contexts:
-                if c.isStartEndPeriod and not c.hasSegment and c.startDatetime is not None and c.endDatetime is not None:
-                    val.requiredContext = c
+                if (not c.qnameDims and c.isStartEndPeriod and
+                    c.startDatetime is not None and c.endDatetime is not None and
+                    XmlUtil.dateunionValue(c.endDatetime, subtractOneDay=True) == reportingPeriodEnd):
+                    val.reportingPeriodContext = c
                     break
 
         if val.requiredContext is None:
             modelXbrl.error(("EFM.6.05.19", "GFM.1.02.18"),
-                _("Required context (no segment) not found for document type %(documentType)s."),
+                _("A required context was not found for document type %(documentType)s.  A required context "
+                  "has an entity identifier matching the filing CIK, no taxonomy-defined dimensions, and a "
+                  "duration ending %(reportingPeriodEnd)s, the submission reporting period end%(orFilingDate)s."),
                 edgarCode="cp-0519-Required-Context",
-                modelObject=modelXbrl, documentType=deiDocumentType)
+                modelObject=modelXbrl, documentType=deiDocumentType,
+                reportingPeriodEnd=reportingPeriodEnd or "(not determinable)",
+                orFilingDate=", or a one day duration ending {}, the filing date".format(filingDateParam)
+                             if filingDateParam else "")
+        elif requiredContextCondition == "anchor":
+            modelXbrl.info("EFM.6.05.19.requiredContextInferred",
+                _("Context %(contextID)s was taken as the required context because it is the only one holding "
+                  "the facts expected in it, neither a periodOfReport nor a filingDate parameter being available "
+                  "to match its end date.  Pass the filingDate parameter to resolve it as EDGAR does."),
+                modelObject=val.requiredContext, contextID=val.requiredContext.id)
 
         #6.5.11 equivalent units
         uniqueUnitHashes = {}
@@ -1470,8 +1494,18 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                         yielded = True
                                         yield f
                             elif requiredContext and deiDocumentType:
-                                if ((context.isInstantPeriod and not context.qnameDims) or
-                                    (context.isStartEndPeriod and context.isEqualTo(documentTypeFact.context))):
+                                # The required context (r) of EXG 3.1, or the Subsequent Event context
+                                # (se) of EXG 3.1.15: period type instant, no taxonomy-defined
+                                # dimensions, and a date on or after the end date of the period of the
+                                # required context.  These remain a union here because dei-validations
+                                # entries do not yet carry an EXG context class to select between them;
+                                # r and se are distinct classes and the EXG table distinguishes them.
+                                if (context is val.requiredContext or
+                                    (context.isInstantPeriod and not context.qnameDims and
+                                     (val.requiredContext is None or
+                                      (context.endDatetime is not None and
+                                       val.requiredContext.endDatetime is not None and
+                                       context.endDatetime >= val.requiredContext.endDatetime)))):
                                     if not deduplicate or notdup(f):
                                         if sevCovered: sevCoveredFacts.add(f)
                                         yielded = True
@@ -1706,8 +1740,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 reportDate = "{2}-{0}-{1}".format(*str(reportDate).split('-')) # mm-dd-yyyy
             elif documentPeriodEndDate:
                 reportDate = str(documentPeriodEndDate)
-            elif val.requiredContext is not None:
-                reportDate = str(XmlUtil.dateunionValue(val.requiredContext.endDatetime, subtractOneDay=True))
+            elif val.reportingPeriodContext is not None:
+                reportDate = str(XmlUtil.dateunionValue(val.reportingPeriodContext.endDatetime, subtractOneDay=True))
             for sevIndex, sev in enumerate(sevs):
                 subTypes = sev.get("subTypeSet", EMPTY_SET) # compiled set of sub-types
                 subTypesPattern = sev.get("subTypesPattern")
@@ -2189,12 +2223,15 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                         if fr is None and f is not None:
                             sevMessage(sev, subType=submissionType, modelObject=sevFacts(sev), tag=name, otherTag=referenceTag, value=fr.xValue, contextID=fr.contextID)
                 elif validation == "required-context-duration":
+                    # EXG 3.2.6 states the required context period is 6 months (HF) or 12 months (AF.CEF),
+                    # which is the reporting period of condition 3.b, not a condition 3.c one day duration.
                     # ensure a valid context is provided with endDatetime and startDatetime
-                    if val.requiredContext.endDatetime and val.requiredContext.startDatetime:
-                        monthsDuration = (val.requiredContext.endDatetime - val.requiredContext.startDatetime).days / 30.4375 # 30.4375 specified by DERA to use in the transforms for days to months
+                    cntx = val.reportingPeriodContext
+                    if cntx is not None and cntx.endDatetime and cntx.startDatetime:
+                        monthsDuration = (cntx.endDatetime - cntx.startDatetime).days / 30.4375 # 30.4375 specified by DERA to use in the transforms for days to months
                         if not value - 1 < monthsDuration < value + 1: # fractional months likely due to days per month
-                            sevMessage(sev, subType=submissionType, modelObject=val.requiredContext, tag="Required Context Period Duration",
-                                    value=f"{monthsDuration:.1f} months", expectedValue=f"{value} months", contextID=val.requiredContext.id)
+                            sevMessage(sev, subType=submissionType, modelObject=cntx, tag="Required Context Period Duration",
+                                    value=f"{monthsDuration:.1f} months", expectedValue=f"{value} months", contextID=cntx.id)
                 # fee tagging
                 elif validation in ("fe", "fw","fo"):
                     instDurNames = defaultdict(list)
@@ -3991,3 +4028,105 @@ def cleanedCompanyName(name):
                                  ):
         name = re.sub(pattern, replacement, name, flags=re.IGNORECASE)
     return unicodedata.normalize('NFKD', name.strip().lower()).encode('ASCII', 'ignore').decode()  # remove diacritics
+
+
+def edgarDateParamValue(dateParam):
+    """Normalize an EDGAR date parameter to an ISO yyyy-mm-dd string, or None.
+
+    EDGAR supplies dates such as periodOfReport and filingDate as mm-dd-yyyy, whereas a
+    command line, GUI formula parameter or web interface caller more naturally writes ISO
+    yyyy-mm-dd.  The two forms are distinguished by which group has four digits, so both are
+    accepted.  Any other value is returned as-is for the caller's comparison to simply fail.
+    """
+    if not dateParam:
+        return None
+    parts = str(dateParam).strip().split("-")
+    if len(parts) == 3 and len(parts[2]) == 4:  # mm-dd-yyyy
+        return "{2}-{0}-{1}".format(*parts)
+    return str(dateParam).strip()  # already yyyy-mm-dd, or unrecognized
+
+
+def selectRequiredContext(contexts, cik, reportingPeriodEnd, filingDate, anchorFacts=()):
+    """Select the required context as defined by the EDGAR XBRL Guide (EXG) section 3.1.
+
+    EXG 3.1 states that the context of an expected fact will have (1) an entity identifier
+    matching the filing CIK, and (2) either (a) no taxonomy-defined dimensions or (b) a
+    dimension from a standard taxonomy, and (3) a period whose end date matches the reporting
+    period end, which may be (a) an instant, (b) a duration matching the quarter or year of
+    the submission reporting period, or (c) a duration of one day representing the intended
+    date of submission.  It then narrows:
+
+        "Conditions 1, 2.a, and either 3b or 3c jointly define the required context.  There
+        may be more than one context that matches all four conditions, in which case 3.c
+        takes precedence over 3.b."
+
+    So the required context is undimensioned (2.a, not 2.b) and is a duration (3.b or 3.c,
+    never 3.a).  Condition 2.b and condition 3.a describe the related contexts used by other
+    expected facts: a dimensioned relative such as the business contact (bc), former address
+    (fa) or class (cc) context, and the undimensioned instant Subsequent Event (se) context
+    of EXG 3.1.15.  Those must not be selected here.
+
+    Arguments are plain values rather than the validation state, so that the selection can be
+    unit tested against constructed context objects instead of by loading a filing:
+      contexts            ModelContext objects, in document order (EXG 3.1.2 note 1 observes
+                          that the required context is conventionally emitted first, so
+                          document order is the tie-break among equal candidates)
+      cik                 filing CIK, or None to skip condition 1
+      reportingPeriodEnd  ISO yyyy-mm-dd reporting period end for condition 3.b, being the
+                          periodOfReport parameter when EDGAR supplies it, else the
+                          dei:DocumentPeriodEndDate fact value
+      filingDate          ISO yyyy-mm-dd intended date of submission for condition 3.c.  Only
+                          EDGAR (or a caller passing the filingDate parameter) knows this; it
+                          is not recorded in a disseminated filing, so 3.c is unavailable
+                          rather than guessed when it is absent
+      anchorFacts         dei facts expected in the required context (CIK, DocumentType,
+                          registrant name, document period end date).  When neither 3.b nor
+                          3.c resolves, a single undimensioned duration context shared by all
+                          of the present anchor facts identifies the required context; this is
+                          the case of EFM conformance 605-19 _009gd, "only one of multiple
+                          contexts matches context for required facts CIK, registrant name".
+
+    Returns (context, condition) where condition is "3.c", "3.b", "anchor" or None.  A None
+    context means no context satisfies EXG 3.1 and EFM 6.5.19 is reportable.
+    """
+    candidates = []
+    match3b = []
+    match3c = []
+    for cntx in contexts:
+        if cntx.qnameDims:  # condition 2.a: no taxonomy-defined dimensions
+            continue
+        # conditions 3.b and 3.c are both durations; 3.a instants are the se class, not this
+        if not cntx.isStartEndPeriod or cntx.startDatetime is None or cntx.endDatetime is None:
+            continue
+        if cik and cntx.entityIdentifier is not None and cntx.entityIdentifier[1] != cik:
+            continue  # condition 1: entity identifier matches the filing CIK
+        candidates.append(cntx)
+        endDate = XmlUtil.dateunionValue(cntx.endDatetime, subtractOneDay=True)
+        days = (cntx.endDatetime - cntx.startDatetime).days
+        if filingDate and endDate == filingDate and days == 1:
+            match3c.append(cntx)  # condition 3.c, which takes precedence over 3.b
+        elif reportingPeriodEnd and endDate == reportingPeriodEnd and days <= 400:
+            # condition 3.b is "a duration matching the quarter or year of the submission reporting
+            # period", so a cumulative period ending on the same date, such as the inception to date
+            # period of an early stage company, does not qualify.  The bound admits a quarter, a half
+            # year (EXG 3.2.6), a 52 or 53 week year and a transition period, and excludes multi-year
+            # cumulative durations rather than enumerating exact month counts.
+            match3b.append(cntx)
+    # A filing may hold several undimensioned durations ending on the reporting period end, such as
+    # the year and an inception to date period of an early stage company (EFM conformance 605-19
+    # _009gd).  The facts expected in the required context distinguish them.
+    # Expected facts may appear in more than one undimensioned context, so rank by how many of
+    # them a context holds rather than requiring unanimity; max() keeps document order on a tie.
+    anchorCounts = {}
+    for f in anchorFacts:
+        if f is not None and f.context is not None:
+            anchorCounts[f.context] = anchorCounts.get(f.context, 0) + 1
+    for matched, condition in ((match3c, "3.c"), (match3b, "3.b")):
+        if matched:
+            return max(matched, key=lambda c: anchorCounts.get(c, 0)), condition
+    # Neither header date resolved a context: fall back to the context holding the most of the
+    # facts expected in the required context, when any context holds one at all.
+    ranked = [c for c in candidates if anchorCounts.get(c, 0)]
+    if ranked:
+        return max(ranked, key=lambda c: anchorCounts.get(c, 0)), "anchor"
+    return None, None

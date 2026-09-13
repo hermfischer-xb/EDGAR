@@ -20,6 +20,11 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "accessionNumber":"0001125840-15-000159" ,
    # new fields
    "periodOfReport": "mm-dd-yyyy",
+   "filingDate": "mm-dd-yyyy", # or yyyy-mm-dd; the date the submission is intended to be filed,
+                               # used for the required context per EDGAR XBRL Guide (EXG) 3.1
+                               # condition 3.c.  Supplied by the EDGAR code invoking Arelle; for
+                               # other uses pass it e.g. --parameters "filingDate=2026-09-11",
+                               # by GUI formula parameters dialog, or as a web interface parameter.
    "entityRegistration.fyEnd": "mm/dd", # the FY End value from entity (CIK) registration
    "entity.repFileNum": file number from entity (CIK) registration
    "submissionHeader.fyEnd": "mm/dd", # the FY End value from submission header
@@ -88,6 +93,7 @@ For test case operation, the above fields accepted from testcase variation:
      <parameter name="cikName" datatype="xs:string" value="cik3:name3" />
      <parameter name="submissionType" datatype="xs:string" value="8-K" />
      <parameter name="periodOfReport" datatype="xs:string" value="12-31-2017" />
+     <parameter name="filingDate" datatype="xs:string" value="02-15-2018" />
      <parameter name="voluntaryFilerFlag" datatype="xs:boolean" value="true" />
      <parameter name="coregCikFileNumber" datatype="xs:string" value="cik1:fileNbr1" />
      <parameter name="coregCikFileNumber" datatype="xs:string" value="cik2:fileNbr2" />
@@ -193,7 +199,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
     val.params = {}
     parameterNames = {"CIK", "cik", "cikList", "cikNameList", "submissionType", "exhibitType", "attachmentDocumentType", # CIK or cik both allowed
                       "itemsList", "accessionNumber", "entity.repFileNum",
-                      "periodOfReport", "entityRegistration.fyEnd", "submissionHeader.fyEnd", "voluntaryFilerFlag",
+                      "periodOfReport", "filingDate", "entityRegistration.fyEnd", "submissionHeader.fyEnd", "voluntaryFilerFlag",
                       "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus", "smallBusinessFlag",
                       "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "invCompanyType",
                       "rptIncludeAllSeriesFlag", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds",
