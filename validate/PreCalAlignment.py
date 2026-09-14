@@ -191,8 +191,8 @@ def checkForCalculations(val, parentChildRels, siblingRels, iSibling, totalConce
             totalFactUnit = totalFact.unit
             if (totalFactContext is not None and totalFactUnit is not None and totalFactContext.endDatetime is not None and
                 (not isStatementSheet or
-                 (val.reportingPeriodContext is None or
-                  val.reportingPeriodContext.startDatetime <= totalFactContext.endDatetime <= val.reportingPeriodContext.endDatetime))):
+                 (val.requiredContext is None or
+                  val.requiredContext.startDatetime <= totalFactContext.endDatetime <= val.requiredContext.endDatetime))):
                 compatibleItemConcepts = set()
                 compatibleFacts = {totalFact}
                 for itemConcept in contributingItems:
