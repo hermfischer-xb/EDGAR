@@ -51,6 +51,7 @@ exgRequiredContextDurationSubmissionSets = {
     "HF":  {"N-CSRS", "N-CSRS/A"},
     "OA":  {"17AD-27", "17AD-27/A", "SD", "SD/A", "2.01 SD", "SDR", "SDR/A", "K SDR", "L SDR",
             "SBSEF-CCO-RPT", "SBSEF-CCO-RPT/A"},
+    "QF":  {"10-Q", "10-Q/A", "10-QT", "10-QT/A", "SBSEF-FIN-QTR", "SBSEF-FIN-QTR/A"},
     "PX":  {"DEF 14A", "DEF 14C", "DEFA14A", "DEFA14C", "DEFC14A", "DEFC14C", "DEFM14A", "DEFM14C",
             "DEFR14A", "DEFR14C", "PRE 14A", "PRE 14C", "PREC14A", "PREC14C", "PREM14A", "PREM14C",
             "PRER14A", "PRER14C"},
