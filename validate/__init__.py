@@ -20,11 +20,11 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "accessionNumber":"0001125840-15-000159" ,
    # new fields
    "periodOfReport": "mm-dd-yyyy",
-   "filingDate": "mm-dd-yyyy", # or yyyy-mm-dd; the date the submission is intended to be filed,
-                               # used for the required context per EDGAR XBRL Guide (EXG) 3.1
-                               # condition 3.c.  Supplied by the EDGAR code invoking Arelle; for
-                               # other uses pass it e.g. --parameters "filingDate=2026-09-11",
-                               # by GUI formula parameters dialog, or as a web interface parameter.
+   "filingDate": "mm-dd-yyyy", # or yyyy-mm-dd; the date the submission is intended to be filed
+                               # (EDGAR XBRL Guide (EXG) 3.1.2 {3}).  Supplied by the EDGAR code
+                               # invoking Arelle; for other uses pass it e.g.
+                               # --parameters "filingDate=2026-09-11", by GUI formula parameters
+                               # dialog, or as a web interface parameter.
    "entityRegistration.fyEnd": "mm/dd", # the FY End value from entity (CIK) registration
    "entity.repFileNum": file number from entity (CIK) registration
    "submissionHeader.fyEnd": "mm/dd", # the FY End value from submission header
@@ -45,6 +45,10 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "rptSeriesClassInfo.classIds": ["C000000123", ...] # list of EDGAR classId values
    "newClass2.classIds": [] # //classId xpath result on submission headers
    "saveCoverFacts": test environment file into which to save JSON output
+   "rssItemParameters": true/false, # when validating an EDGAR RSS feed, take submissionType, cik, periodOfReport
+                                    # and filingDate for each filing from its feed item (explicit parameters take precedence)
+   "logRequiredContext": true/false, # log one info message per filing (code EDGAR.requiredContext) naming the required
+                                     # context chosen and the step of the required context ordering that decided it
    # CEF forms
    "eligibleFundFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
    "pursuantGeneralInstructionFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
@@ -205,11 +209,12 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                       "rptIncludeAllSeriesFlag", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds",
                       "rptIncludeAllClassesFlag", "rptSeriesClassInfo.classIds", "newClass2.classIds",
                       "eligibleFundFlag", "pursuantGeneralInstructionFlag", "filerNewRegistrantFlag",
-                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts",
+                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "rssItemParameters", "logRequiredContext",
                       "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
     boolParameterNames = {"voluntaryFilerFlag", "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus",
                           "smallBusinessFlag", "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "rptIncludeAllSeriesFlag",
-                          "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag"}
+                          "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag",
+                          "rssItemParameters", "logRequiredContext"}
     parameterEisFileTags = {
         "cik":["depositorId", "cik", "filerId"],
         "submissionType": "submissionType",
@@ -309,6 +314,20 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                         v = None
                 if v not in (None, ""):
                     val.params[paramName] = v # if not set uses prior value
+    # An EDGAR RSS feed item carries the submission header fields of its filing.  With the rssItemParameters
+    # parameter, they supply the header parameters of each filing validated from the feed, as EDGAR would have
+    # passed them; parameters given explicitly take precedence.
+    rssItem = getattr(val.modelXbrl, "efmRssItem", None)
+    if rssItem is not None and val.params.get("rssItemParameters") is True:
+        if rssItem.formType:
+            val.params.setdefault("submissionType", rssItem.formType)
+        if rssItem.cikNumber and not ({"CIK", "cik", "cikList", "cikNameList"} & val.params.keys()):
+            val.params["cik"] = rssItem.cikNumber.zfill(10)
+        if rssItem.period: # yyyy-mm-dd, whereas EDGAR passes periodOfReport as mm-dd-yyyy
+            yyyy, mm, dd = rssItem.period.split("-")
+            val.params.setdefault("periodOfReport", f"{mm}-{dd}-{yyyy}")
+        if rssItem.filingDate: # datetime.date
+            val.params.setdefault("filingDate", rssItem.filingDate.strftime("%m-%d-%Y"))
     if "CIK" in val.params: # change to lower case key
         val.params["cik"] = val.params["CIK"]
         del val.params["CIK"]
@@ -606,6 +625,7 @@ def filingEnd(cntlr, options, filesource, entrypointFiles, sourceZipStream=None,
 
 def rssItemXbrlLoaded(modelXbrl, rssWatchOptions, rssItem, *args, **kwargs):
     # Validate of RSS feed item (simulates filing & cmd line load events
+    modelXbrl.efmRssItem = rssItem # submission header fields of the item, for rssItemParameters in validateXbrlStart
     if not hasattr(rssItem.modelXbrl, "efmOptions"): # may have already been set by EdgarRenderer in gui startup
         rssItem.modelXbrl.efmOptions = rssWatchOptions  # save options in rss's modelXbrl
     testcaseVariationXbrlLoaded(rssItem.modelXbrl, modelXbrl, None)
