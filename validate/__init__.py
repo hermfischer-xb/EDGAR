@@ -323,7 +323,9 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
             val.params.setdefault("submissionType", rssItem.formType)
         if rssItem.cikNumber and not ({"CIK", "cik", "cikList", "cikNameList"} & val.params.keys()):
             val.params["cik"] = rssItem.cikNumber.zfill(10)
-        if rssItem.period: # yyyy-mm-dd, whereas EDGAR passes periodOfReport as mm-dd-yyyy
+        # yyyy-mm-dd, whereas EDGAR passes periodOfReport as mm-dd-yyyy; the feed gives 1969-12-31 (epoch zero)
+        # for a submission without a period of report, which EDGAR would not pass
+        if rssItem.period and rssItem.period != "1969-12-31":
             yyyy, mm, dd = rssItem.period.split("-")
             val.params.setdefault("periodOfReport", f"{mm}-{dd}-{yyyy}")
         if rssItem.filingDate: # datetime.date
