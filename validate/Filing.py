@@ -862,25 +862,35 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 documentTypeIn="yes" if any(f.context is _rc for f in _documentTypeFacts) and _rc is not None else "no",
                 documentTypeContexts=", ".join(sorted({f.contextID for f in _documentTypeFacts})) or "(none)")
         if val.params.get("requiredContextShadow") == "cover": # log-only comparison selection, for batch analysis
-            _deiFacts = {"DocumentType": [], "DocumentPeriodEndDate": []}
+            _deiFacts = {"DocumentType": [], "DocumentPeriodEndDate": [], "EntityCentralIndexKey": []}
             for _localName, _facts in _deiFacts.items():
                 for f in modelXbrl.factsByLocalName.get(_localName, ()):
                     if (f.context is not None and not f.isNil and disclosureSystem.deiNamespacePattern is not None and
                         disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI)):
                         _facts.append(f)
             _dpedValues = {str(f.xValue)[:10] for f in _deiFacts["DocumentPeriodEndDate"] if f.xValue is not None}
+            # EntityCentralIndexKey anchor: facts whose value is a submission CIK, all of them when no CIK is known
+            _cikFacts = [f for f in _deiFacts["EntityCentralIndexKey"]
+                         if not headerCiks or (f.value or "").strip().zfill(10) in headerCiks]
             _shadow, _shadowRule = selectCoverAnchoredContext(
                 requiredContextEligible, {f.context for f in _deiFacts["DocumentType"]}, _dpedValues, val.params.get("cik"))
+            _cikShadow, _cikShadowRule = selectCoverAnchoredContext(
+                requiredContextEligible, {f.context for f in _cikFacts}, _dpedValues, val.params.get("cik"))
             _exg = val.requiredContext
+            # agreement by aspects (period, entity, dimensions), so duplicate contexts under other ids agree
+            _agrees = lambda c1, c2: "yes" if c1 is c2 or (c1 is not None and c2 is not None and c1.isEqualTo(c2)) else "no"
             modelXbrl.info("EDGAR.requiredContextShadow",
-                _("Cover-anchored context %(shadowContextID)s %(shadowPeriod)s by rule %(shadowRule)s; the required "
-                  "context is %(exgContextID)s (step %(exgStep)s); agrees: %(agreesWithExg)s."),
+                _("Cover-anchored context %(shadowContextID)s %(shadowPeriod)s by rule %(shadowRule)s, CIK-anchored "
+                  "context %(cikShadowContextID)s by rule %(cikShadowRule)s; the required context is %(exgContextID)s "
+                  "(step %(exgStep)s); agrees: %(agreesWithExg)s, CIK-anchored agrees: %(cikAgreesWithExg)s."),
                 modelObject=_shadow if _shadow is not None else modelXbrl,
                 shadowContextID=getattr(_shadow, "id", "(none)"), shadowPeriod=contextPeriodText(_shadow),
                 shadowRule=_shadowRule,
-                # agreement by aspects (period, entity, dimensions), so duplicate contexts under other ids agree
-                agreesWithExg="yes" if _shadow is _exg or (_shadow is not None and _exg is not None and
-                                                          _shadow.isEqualTo(_exg)) else "no",
+                agreesWithExg=_agrees(_shadow, _exg),
+                cikShadowContextID=getattr(_cikShadow, "id", "(none)"), cikShadowPeriod=contextPeriodText(_cikShadow),
+                cikShadowRule=_cikShadowRule, cikAgreesWithExg=_agrees(_cikShadow, _exg),
+                cikAgreesWithDocumentTypeAnchor=_agrees(_cikShadow, _shadow),
+                entityCentralIndexKeyContexts=", ".join(sorted({f.contextID for f in _cikFacts})) or "(none)",
                 exgContextID=getattr(_exg, "id", "(none)"), exgPeriod=contextPeriodText(_exg),
                 exgStep=requiredContextIneligibleStep or requiredContextStep or "(none)",
                 submissionType=submissionType or "(none)",
@@ -4222,7 +4232,7 @@ def contextPeriodText(cntx):
     return "forever"
 
 
-def selectCoverAnchoredContext(eligibleContexts, documentTypeContexts, documentPeriodEndDates, primaryCik):
+def selectCoverAnchoredContext(eligibleContexts, anchorContexts, documentPeriodEndDates, primaryCik):
     """A cover-anchored selection of the required context, logged beside selectRequiredContext for comparison in
     batch runs (parameter requiredContextShadow=cover).  It does not affect validation.
 
@@ -4245,9 +4255,13 @@ def selectCoverAnchoredContext(eligibleContexts, documentTypeContexts, documentP
       4-noCover      no DocumentType fact and no duration ending on a DocumentPeriodEndDate value (fee exhibits)
       4-ineligibleCover  DocumentType facts exist, but none is in an eligible context, and no fallback applies
 
+    The anchor is dei:DocumentType as described, or alternatively the dei:EntityCentralIndexKey facts whose value is
+    a submission CIK: a fee exhibit has EntityCentralIndexKey and no DocumentType, and elsewhere the two are normally
+    in the same context.  The rules are the same for either anchor.
+
     Arguments:
       eligibleContexts        contexts remaining after steps 1 and 2 (requiredContextEligibleContexts)
-      documentTypeContexts    set of contexts holding a dei:DocumentType fact
+      anchorContexts          set of contexts holding an anchor fact (dei:DocumentType, or dei:EntityCentralIndexKey)
       documentPeriodEndDates  set of yyyy-mm-dd values of dei:DocumentPeriodEndDate facts
       primaryCik              primary submission header CIK, or None
 
@@ -4277,7 +4291,7 @@ def selectCoverAnchoredContext(eligibleContexts, documentTypeContexts, documentP
     eligible = [c for c in eligibleContexts if c.endDatetime is not None]
     durations = [c for c in eligible if c.isStartEndPeriod and c.startDatetime is not None]
     dated = [c for c in durations if endDate(c) in documentPeriodEndDates]
-    anchors = [c for c in durations if c in documentTypeContexts]
+    anchors = [c for c in durations if c in anchorContexts]
     if anchors:
         if len(anchors) == 1 and (anchors[0] in dated or not dated):
             return anchors[0], "2"
@@ -4287,7 +4301,7 @@ def selectCoverAnchoredContext(eligibleContexts, documentTypeContexts, documentP
         return decide(candidates, "3")
     if dated:
         return (dated[0], "5-dped") if len(dated) == 1 else decide(dated, "5")
-    instants = [c for c in eligible if c.isInstantPeriod and c in documentTypeContexts]
+    instants = [c for c in eligible if c.isInstantPeriod and c in anchorContexts]
     if instants:
         return max(instants, key=lambda c: c.endDatetime), "6-instantOnly"
-    return None, ("4-ineligibleCover" if documentTypeContexts else "4-noCover")
+    return None, ("4-ineligibleCover" if anchorContexts else "4-noCover")
