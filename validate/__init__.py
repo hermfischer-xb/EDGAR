@@ -49,6 +49,9 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
                                     # and filingDate for each filing from its feed item (explicit parameters take precedence)
    "logRequiredContext": true/false, # log one info message per filing (code EDGAR.requiredContext) naming the required
                                      # context chosen and the step of the required context ordering that decided it
+   "requiredContextShadow": "cover" or absent, # log one info message per filing (code EDGAR.requiredContextShadow)
+                                     # comparing a cover-anchored selection (Filing.selectCoverAnchoredContext) with
+                                     # the required context; batch analysis only, validation is unaffected
     "messageCodes": ["EXG", "EFM"], # guides whose references form message codes, in priority order; default "EFM".
                                     # "EXG" codes a message by its EDGAR XBRL Guide reference where it has one; "EFM"
                                     # requests the legacy EDGAR Filer Manual codes.  Listing both also gives each message
@@ -211,8 +214,8 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                       "rptIncludeAllSeriesFlag", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds",
                       "rptIncludeAllClassesFlag", "rptSeriesClassInfo.classIds", "newClass2.classIds",
                       "eligibleFundFlag", "pursuantGeneralInstructionFlag", "filerNewRegistrantFlag",
-                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "rssItemParameters", "logRequiredContext", "messageCodes",
-                      "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
+                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "rssItemParameters", "logRequiredContext",
+                      "requiredContextShadow", "messageCodes", "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
     boolParameterNames = {"voluntaryFilerFlag", "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus",
                           "smallBusinessFlag", "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "rptIncludeAllSeriesFlag",
                           "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag",
