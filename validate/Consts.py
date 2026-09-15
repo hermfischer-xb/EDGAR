@@ -37,6 +37,32 @@ docTypesRequiringPeriodOfReport = {"10", "10-K", "10-Q", "20-F", "40-F", "6-K", 
     "F-9/A", "S-1/A", "S-11/A", "S-3/A", "S-4/A", "10-KT/A", "10-QT/A", "485APOS", "485BPOS", "485BXT", "497",
     "N-CSR", "N-CSRS", "N-Q", "N-CSR/A", "N-CSRS/A", "N-Q/A", "K SDR", "L SDR" }
 
+# EDGAR XBRL Guide (EXG) Table 6-1 submission sets for which step 4 of the required context ordering
+# applies (see Filing.selectRequiredContext).  Types are listed without the Table 6-2 "#" form and "%"
+# exhibit suffixes.  EBP is published as "11K, 11-K/A, 11-KT, 11-K", read here as 11-K, 11-K/A, 11-KT and
+# 11-KT/A.  SD and SDR also carry the document types given in place of the submission type when previewing
+# on the desktop ("2.01 SD", "K SDR", "L SDR"), as in dei-validations.json.
+exgRequiredContextDurationSubmissionSets = {
+    "6K":  {"6-K", "6-K/A"},
+    "8K":  {"8-K", "8-K/A", "8-K12B", "8-K12B/A", "8-K12G3", "8-K12G3/A", "8-K15D5", "8-K15D5/A"},
+    "AF":  {"10-K", "10-K/A", "10-KT", "10-KT/A", "20-F", "20-F/A", "40-F", "40-F/A",
+            "N-CSR", "N-CSR/A", "SP 15D2", "SP 15D2/A"},
+    "EBP": {"11-K", "11-K/A", "11-KT", "11-KT/A"},
+    "HF":  {"N-CSRS", "N-CSRS/A"},
+    "OA":  {"17AD-27", "17AD-27/A", "SD", "SD/A", "2.01 SD", "SDR", "SDR/A", "K SDR", "L SDR",
+            "SBSEF-CCO-RPT", "SBSEF-CCO-RPT/A"},
+    "QF":  {"10-Q", "10-Q/A", "10-QT", "10-QT/A", "SBSEF-FIN-QTR", "SBSEF-FIN-QTR/A"},
+    "PX":  {"DEF 14A", "DEF 14C", "DEFA14A", "DEFA14C", "DEFC14A", "DEFC14C", "DEFM14A", "DEFM14C",
+            "DEFR14A", "DEFR14C", "PRE 14A", "PRE 14C", "PREC14A", "PREC14C", "PREM14A", "PREM14C",
+            "PRER14A", "PRER14C"},
+    "RF":  {"SBSEF-FIN-REQ", "SBSEF-FIN-REQ/A"},
+    "SE":  {"SBSEF", "SBSEF/A"},
+    "TF":  {"10-KT", "10-KT/A", "10-QT", "10-QT/A", "11-KT", "11-KT/A"},
+    "TO":  {"SC14D1F", "SC14D1F/A", "SC 14D9", "SC 14D9/A", "SC14D9C", "SC13E4F", "SC13E4F/A",
+            "SC TO-I", "SC TO-I/A", "SC TO-C", "SC TO-C/A", "SC TO-T", "SC TO-T/A"},
+}
+exgRequiredContextDurationSubmissionTypes = frozenset().union(*exgRequiredContextDurationSubmissionSets.values())
+
 docTypesRequiringRrSchema = \
 docTypesExemptFromRoleOrder = \
 submissionTypesExemptFromRoleOrder = ('485APOS', '485BPOS','485BXT', '497', 'N-1A', 'N-1A/A',
