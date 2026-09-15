@@ -49,6 +49,9 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
                                     # and filingDate for each filing from its feed item (explicit parameters take precedence)
    "logRequiredContext": true/false, # log one info message per filing (code EDGAR.requiredContext) naming the required
                                      # context chosen and the step of the required context ordering that decided it
+   "requiredContextShadow": "cover" or absent, # log one info message per filing (code EDGAR.requiredContextShadow)
+                                     # comparing a cover-anchored selection (Filing.selectCoverAnchoredContext) with
+                                     # the required context; batch analysis only, validation is unaffected
    # CEF forms
    "eligibleFundFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
    "pursuantGeneralInstructionFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
@@ -210,7 +213,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                       "rptIncludeAllClassesFlag", "rptSeriesClassInfo.classIds", "newClass2.classIds",
                       "eligibleFundFlag", "pursuantGeneralInstructionFlag", "filerNewRegistrantFlag",
                       "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "rssItemParameters", "logRequiredContext",
-                      "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
+                      "requiredContextShadow", "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
     boolParameterNames = {"voluntaryFilerFlag", "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus",
                           "smallBusinessFlag", "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "rptIncludeAllSeriesFlag",
                           "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag",

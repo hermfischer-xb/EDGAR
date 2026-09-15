@@ -861,6 +861,32 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 documentPeriodEndDateContexts=", ".join(sorted(c.id for c in documentPeriodEndDateContexts)) or "(none)",
                 documentTypeIn="yes" if any(f.context is _rc for f in _documentTypeFacts) and _rc is not None else "no",
                 documentTypeContexts=", ".join(sorted({f.contextID for f in _documentTypeFacts})) or "(none)")
+        if val.params.get("requiredContextShadow") == "cover": # log-only comparison selection, for batch analysis
+            _deiFacts = {"DocumentType": [], "DocumentPeriodEndDate": []}
+            for _localName, _facts in _deiFacts.items():
+                for f in modelXbrl.factsByLocalName.get(_localName, ()):
+                    if (f.context is not None and not f.isNil and disclosureSystem.deiNamespacePattern is not None and
+                        disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI)):
+                        _facts.append(f)
+            _dpedValues = {str(f.xValue)[:10] for f in _deiFacts["DocumentPeriodEndDate"] if f.xValue is not None}
+            _shadow, _shadowRule = selectCoverAnchoredContext(
+                requiredContextEligible, {f.context for f in _deiFacts["DocumentType"]}, _dpedValues, val.params.get("cik"))
+            _exg = val.requiredContext
+            modelXbrl.info("EDGAR.requiredContextShadow",
+                _("Cover-anchored context %(shadowContextID)s %(shadowPeriod)s by rule %(shadowRule)s; the required "
+                  "context is %(exgContextID)s (step %(exgStep)s); agrees: %(agreesWithExg)s."),
+                modelObject=_shadow if _shadow is not None else modelXbrl,
+                shadowContextID=getattr(_shadow, "id", "(none)"), shadowPeriod=contextPeriodText(_shadow),
+                shadowRule=_shadowRule,
+                # agreement by aspects (period, entity, dimensions), so duplicate contexts under other ids agree
+                agreesWithExg="yes" if _shadow is _exg or (_shadow is not None and _exg is not None and
+                                                          _shadow.isEqualTo(_exg)) else "no",
+                exgContextID=getattr(_exg, "id", "(none)"), exgPeriod=contextPeriodText(_exg),
+                exgStep=requiredContextIneligibleStep or requiredContextStep or "(none)",
+                submissionType=submissionType or "(none)",
+                documentTypeContexts=", ".join(sorted({f.contextID for f in _deiFacts["DocumentType"]})) or "(none)",
+                documentPeriodEndDateValue=", ".join(sorted(_dpedValues)) or "(none)",
+                coRegistrantCiks=", ".join(sorted(headerCiks - {val.params.get("cik")})) or "(none)")
 
         #6.5.11 equivalent units
         uniqueUnitHashes = {}
@@ -4181,3 +4207,87 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
                             if c.isInstantPeriod and c.endDatetime == chosen.endDatetime and
                                c.isEntityIdentifierEqualTo(chosen) and c.dimsHash == chosen.dimsHash), None)
     return chosen, requiredInstant, step
+
+
+def contextPeriodText(cntx):
+    """Period of a context for log records: "start..end (N days)", "instant end", "forever", or "" for None."""
+    if cntx is None:
+        return ""
+    if cntx.isInstantPeriod:
+        return "instant " + XmlUtil.dateunionValue(cntx.endDatetime, subtractOneDay=True)
+    if cntx.isStartEndPeriod and cntx.startDatetime is not None and cntx.endDatetime is not None:
+        return "{}..{} ({} days)".format(XmlUtil.dateunionValue(cntx.startDatetime),
+                                         XmlUtil.dateunionValue(cntx.endDatetime, subtractOneDay=True),
+                                         (cntx.endDatetime - cntx.startDatetime).days)
+    return "forever"
+
+
+def selectCoverAnchoredContext(eligibleContexts, documentTypeContexts, documentPeriodEndDates, primaryCik):
+    """A cover-anchored selection of the required context, logged beside selectRequiredContext for comparison in
+    batch runs (parameter requiredContextShadow=cover).  It does not affect validation.
+
+    Proposed 2026-09-15 for testing against months and years of accepted filings: in the 2026-08 EDGAR XBRL feed the
+    context holding dei:DocumentType was the ordering's choice for 99% of filings that have one, and most
+    disagreements were the ordering overriding it.  Unlike the ordering, this uses only fact values and aspects
+    (period, entity identifier, dimensions), never order of appearance or context ids, so it can be restated for a
+    report without physical contexts.  Rules, in order (the rule that decides is returned):
+
+      2              dei:DocumentType is in exactly one eligible duration, and that duration ends on a
+                     dei:DocumentPeriodEndDate value (or no eligible duration does, or there is no such value)
+      3-dped         DocumentType is in several eligible durations and exactly one ends on a DocumentPeriodEndDate
+                     value, or its only duration doesn't end on one and exactly one other eligible duration does
+      3-<tie-break>  otherwise among those durations (those ending on a DocumentPeriodEndDate value when any does):
+                     dimensions (fewest, i.e. the default legal entity), primaryCik (identifier = primary header
+                     CIK), latest (end date), longest; unresolved only if contexts equal in all of these remain
+      5-dped, 5-<tie-break>  no eligible duration holds DocumentType: the eligible durations ending on a
+                     DocumentPeriodEndDate value, with the same tie-breaks
+      6-instantOnly  DocumentType is only in eligible instants: the latest of them, reported although not a duration
+      4-noCover      no DocumentType fact and no duration ending on a DocumentPeriodEndDate value (fee exhibits)
+      4-ineligibleCover  DocumentType facts exist, but none is in an eligible context, and no fallback applies
+
+    Arguments:
+      eligibleContexts        contexts remaining after steps 1 and 2 (requiredContextEligibleContexts)
+      documentTypeContexts    set of contexts holding a dei:DocumentType fact
+      documentPeriodEndDates  set of yyyy-mm-dd values of dei:DocumentPeriodEndDate facts
+      primaryCik              primary submission header CIK, or None
+
+    Returns (context or None, rule).
+    """
+    def endDate(cntx):  # yyyy-mm-dd of the last day of the period; a date-only end is held as the next midnight
+        end = cntx.endDatetime
+        if getattr(end, "dateOnly", (end.hour, end.minute, end.second, end.microsecond) == (0, 0, 0, 0)):
+            end = end - datetime.timedelta(days=1)
+        return end.date().isoformat()
+
+    def identifier(cntx):
+        entityIdentifier = cntx.entityIdentifier
+        return ((entityIdentifier[1] if entityIdentifier else None) or "").strip()
+
+    def decide(candidates, rulePrefix):
+        for tieBreak, key in (("dimensions", lambda c: -len(c.qnameDims)),
+                              ("primaryCik", lambda c: bool(primaryCik) and identifier(c) == primaryCik),
+                              ("latest", lambda c: c.endDatetime),
+                              ("longest", lambda c: c.endDatetime - c.startDatetime)):
+            best = max(key(c) for c in candidates)
+            candidates = [c for c in candidates if key(c) == best]
+            if len(candidates) == 1:
+                return candidates[0], f"{rulePrefix}-{tieBreak}"
+        return min(candidates, key=lambda c: c.id), f"{rulePrefix}-unresolved"  # equal in every aspect compared
+
+    eligible = [c for c in eligibleContexts if c.endDatetime is not None]
+    durations = [c for c in eligible if c.isStartEndPeriod and c.startDatetime is not None]
+    dated = [c for c in durations if endDate(c) in documentPeriodEndDates]
+    anchors = [c for c in durations if c in documentTypeContexts]
+    if anchors:
+        if len(anchors) == 1 and (anchors[0] in dated or not dated):
+            return anchors[0], "2"
+        candidates = [c for c in anchors if c in dated] or (dated if len(anchors) == 1 else anchors)
+        if len(candidates) == 1:
+            return candidates[0], "3-dped"
+        return decide(candidates, "3")
+    if dated:
+        return (dated[0], "5-dped") if len(dated) == 1 else decide(dated, "5")
+    instants = [c for c in eligible if c.isInstantPeriod and c in documentTypeContexts]
+    if instants:
+        return max(instants, key=lambda c: c.endDatetime), "6-instantOnly"
+    return None, ("4-ineligibleCover" if documentTypeContexts else "4-noCover")
