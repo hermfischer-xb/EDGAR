@@ -839,13 +839,19 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
         if val.params.get("logRequiredContext") is True: # one record per filing, for batch analysis
             _documentTypeFacts = modelXbrl.factsByLocalName.get("DocumentType", ())
             _rc = val.requiredContext
+            _rcIdentifier = ((_rc.entityIdentifier[1] if _rc.entityIdentifier else None) or "").strip() if _rc is not None else ""
             modelXbrl.info("EDGAR.requiredContext",
-                _("Required context %(contextID)s %(period)s chosen at step %(step)s, instant %(instantContextID)s, "
+                _("Required context %(contextID)s %(period)s chosen at step %(step)s (step 1 by %(step1)s, "
+                  "%(standardDimensions)s standard dimensions), instant %(instantContextID)s, "
                   "submission type %(submissionType)s, header dates %(headerDates)s, DocumentPeriodEndDate "
                   "contexts %(documentPeriodEndDateContexts)s; DocumentType in it: %(documentTypeIn)s, "
                   "DocumentType contexts: %(documentTypeContexts)s."),
                 modelObject=_rc if _rc is not None else modelXbrl,
                 step=requiredContextIneligibleStep or requiredContextStep or "(none)",
+                # how step 1 was met: a header CIK, the all-zeroes fallback, or not checked for lack of header CIKs
+                step1=("no header CIK" if not headerCiks else "header CIK" if _rcIdentifier in headerCiks else
+                       "all zeroes" if _rc is not None else "(none)"),
+                standardDimensions=len(_rc.qnameDims) if _rc is not None else "",
                 contextID=getattr(_rc, "id", "(none)"),
                 period="{}..{} ({} days)".format(XmlUtil.dateunionValue(_rc.startDatetime),
                                                XmlUtil.dateunionValue(_rc.endDatetime, subtractOneDay=True),
@@ -4130,7 +4136,8 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
       documentPeriodEndDateContexts  contexts holding a dei:DocumentPeriodEndDate fact, for step 4b
 
     Returns (requiredContext, requiredInstantContext, step), where step is the step that decided the
-    required context ("4" to "8"), or (None, None, None) when no eligible context is a duration.
+    required context ("4b", "4c", "4d", "5", "6", "7" or "8"), or (None, None, None) when no eligible context
+    is a duration.  Step 4c decides when one duration is longest, and 4d when several are equally long.
     """
     durations = [c for c in eligibleContexts
                  if c.isStartEndPeriod and c.startDatetime is not None and c.endDatetime is not None]
@@ -4149,11 +4156,11 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
         if window:
             withDocumentPeriodEndDate = [c for c in window if c in documentPeriodEndDateContexts]
             if len(withDocumentPeriodEndDate) == 1:  # 4b
-                chosen = withDocumentPeriodEndDate[0]
+                chosen, step = withDocumentPeriodEndDate[0], "4b"
             else:
                 quarters = max(round(days(c) / 91) for c in window)  # 4c
-                chosen = next(c for c in window if round(days(c) / 91) == quarters)  # 4d
-            step = "4"
+                longest = [c for c in window if round(days(c) / 91) == quarters]
+                chosen, step = longest[0], ("4c" if len(longest) == 1 else "4d")  # 4d: order of appearance
     # steps 5 to 7: the latest end date in the first of these classes of durations that is present
     if chosen is None:
         oneDay = datetime.timedelta(days=1)
