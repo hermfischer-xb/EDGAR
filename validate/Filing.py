@@ -868,14 +868,18 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                     if (f.context is not None and not f.isNil and disclosureSystem.deiNamespacePattern is not None and
                         disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI)):
                         _facts.append(f)
-            _dpedValues = {str(f.xValue)[:10] for f in _deiFacts["DocumentPeriodEndDate"] if f.xValue is not None}
+            _dpedByContext = {} # context: set of its DocumentPeriodEndDate values
+            for f in _deiFacts["DocumentPeriodEndDate"]:
+                if f.xValue is not None:
+                    _dpedByContext.setdefault(f.context, set()).add(str(f.xValue)[:10])
+            _dpedValues = set().union(*_dpedByContext.values())
             # EntityCentralIndexKey anchor: facts whose value is a submission CIK, all of them when no CIK is known
             _cikFacts = [f for f in _deiFacts["EntityCentralIndexKey"]
                          if not headerCiks or (f.value or "").strip().zfill(10) in headerCiks]
             _shadow, _shadowRule = selectCoverAnchoredContext(
-                requiredContextEligible, {f.context for f in _deiFacts["DocumentType"]}, _dpedValues, val.params.get("cik"))
+                requiredContextEligible, {f.context for f in _deiFacts["DocumentType"]}, _dpedByContext, val.params.get("cik"))
             _cikShadow, _cikShadowRule = selectCoverAnchoredContext(
-                requiredContextEligible, {f.context for f in _cikFacts}, _dpedValues, val.params.get("cik"))
+                requiredContextEligible, {f.context for f in _cikFacts}, _dpedByContext, val.params.get("cik"))
             _exg = val.requiredContext
             # agreement by aspects (period, entity, dimensions), so duplicate contexts under other ids agree
             _agrees = lambda c1, c2: "yes" if c1 is c2 or (c1 is not None and c2 is not None and c1.isEqualTo(c2)) else "no"
@@ -4242,10 +4246,12 @@ def selectCoverAnchoredContext(eligibleContexts, anchorContexts, documentPeriodE
     (period, entity identifier, dimensions), never order of appearance or context ids, so it can be restated for a
     report without physical contexts.  Rules, in order (the rule that decides is returned):
 
-      2              dei:DocumentType is in exactly one eligible duration, and that duration ends on a
-                     dei:DocumentPeriodEndDate value (or no eligible duration does, or there is no such value)
-      3-dped         DocumentType is in several eligible durations and exactly one ends on a DocumentPeriodEndDate
-                     value, or its only duration doesn't end on one and exactly one other eligible duration does
+      2              dei:DocumentType is in exactly one eligible duration: that duration, unless 3-dped's override
+                     applies.  The dei:DocumentPeriodEndDate value is a date, which may differ from the context holding
+                     it (a fund prospectus date), so it does not by itself move the selection.
+      3-dped         its only duration holds no dei:DocumentPeriodEndDate fact, while other eligible durations hold one
+                     and end on that fact's value (cover facts tagged in a stale context): those durations; or
+                     DocumentType is in several eligible durations: those ending on a DocumentPeriodEndDate value
       3-<tie-break>  otherwise among those durations (those ending on a DocumentPeriodEndDate value when any does):
                      dimensions (fewest, i.e. the default legal entity), primaryCik (identifier = primary header
                      CIK), latest (end date), longest; unresolved only if contexts equal in all of these remain
@@ -4262,7 +4268,7 @@ def selectCoverAnchoredContext(eligibleContexts, anchorContexts, documentPeriodE
     Arguments:
       eligibleContexts        contexts remaining after steps 1 and 2 (requiredContextEligibleContexts)
       anchorContexts          set of contexts holding an anchor fact (dei:DocumentType, or dei:EntityCentralIndexKey)
-      documentPeriodEndDates  set of yyyy-mm-dd values of dei:DocumentPeriodEndDate facts
+      documentPeriodEndDates  dict of each context holding a dei:DocumentPeriodEndDate fact: set of its yyyy-mm-dd values
       primaryCik              primary submission header CIK, or None
 
     Returns (context or None, rule).
@@ -4290,12 +4296,21 @@ def selectCoverAnchoredContext(eligibleContexts, anchorContexts, documentPeriodE
 
     eligible = [c for c in eligibleContexts if c.endDatetime is not None]
     durations = [c for c in eligible if c.isStartEndPeriod and c.startDatetime is not None]
-    dated = [c for c in durations if endDate(c) in documentPeriodEndDates]
+    documentPeriodEndDateValues = set().union(*documentPeriodEndDates.values())
+    dated = [c for c in durations if endDate(c) in documentPeriodEndDateValues]
     anchors = [c for c in durations if c in anchorContexts]
     if anchors:
-        if len(anchors) == 1 and (anchors[0] in dated or not dated):
-            return anchors[0], "2"
-        candidates = [c for c in anchors if c in dated] or (dated if len(anchors) == 1 else anchors)
+        if len(anchors) == 1:
+            anchor = anchors[0]
+            selfDated = [c for c in durations
+                         if c is not anchor and endDate(c) in documentPeriodEndDates.get(c, ())]
+            if anchor in documentPeriodEndDates or not selfDated:
+                return anchor, "2"
+            candidates = selfDated
+        else:
+            candidates = [c for c in anchors if c in dated] or anchors
+            if len(candidates) == len(anchors):  # not narrowed by DocumentPeriodEndDate
+                return decide(candidates, "3")
         if len(candidates) == 1:
             return candidates[0], "3-dped"
         return decide(candidates, "3")
