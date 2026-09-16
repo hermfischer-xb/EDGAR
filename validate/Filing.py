@@ -4140,7 +4140,8 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
     EDGAR XBRL Guide (EXG) 3.1 states conditions for the required context.  On 2026-09-14 the EXG author
     (W. Hamscher) gave a normative total ordering of the contexts of an instance that selects it, not yet in
     the published guide, and revised step 4 the same day (longest rather than shortest duration, QF added,
-    step 4b added).  Step numbers are his.
+    step 4b added).  On 2026-09-16, after this selection was measured against three months of filings, he replaced
+    4d with the latest end date and moved order of appearance to 4e.  Step numbers are his.
 
       1. An entity identifier matching a submission header CIK, failing that one of all zeroes.  If neither
          exists there is no required context (EFM 6.5.19).
@@ -4153,7 +4154,8 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
          b. if exactly one of them holds a dei:DocumentPeriodEndDate fact, that one
          c. otherwise the longest, with durations rounded to the nearest multiple of 91 days (so 364 and 371
             days are both four quarters, and 46, 90 and 98 days are each one)
-         d. then order of appearance, as in step 8
+         d. otherwise the latest end date among them
+         e. then order of appearance, as in step 8, which the EXG author calls the desperation fallback
          FAST and AM are not listed because each of their submission types is also in a listed set.  The
          period of report is not used: the header period becomes non-normative in 2027, registration
          submissions have none, and dei:DocumentPeriodEndDate's value is itself a fact of the required
@@ -4176,8 +4178,9 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
       documentPeriodEndDateContexts  contexts holding a dei:DocumentPeriodEndDate fact, for step 4b
 
     Returns (requiredContext, requiredInstantContext, step), where step is the step that decided the
-    required context ("4b", "4c", "4d", "5", "6", "7" or "8"), or (None, None, None) when no eligible context
-    is a duration.  Step 4c decides when one duration is longest, and 4d when several are equally long.
+    required context ("4b", "4c", "4d", "4e", "5", "6", "7" or "8"), or (None, None, None) when no eligible
+    context is a duration.  Step 4c decides when one duration is longest, 4d when several are equally long and
+    one of them ends latest, and 4e when equally long durations also end on the same date.
     """
     durations = [c for c in eligibleContexts
                  if c.isStartEndPeriod and c.startDatetime is not None and c.endDatetime is not None]
@@ -4200,7 +4203,10 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
             else:
                 quarters = max(round(days(c) / 91) for c in window)  # 4c
                 longest = [c for c in window if round(days(c) / 91) == quarters]
-                chosen, step = longest[0], ("4c" if len(longest) == 1 else "4d")  # 4d: order of appearance
+                latestEnd = max(c.endDatetime for c in longest)  # 4d
+                latestEnding = [c for c in longest if c.endDatetime == latestEnd]
+                chosen = latestEnding[0]  # 4e: order of appearance
+                step = "4c" if len(longest) == 1 else "4d" if len(latestEnding) == 1 else "4e"
     # steps 5 to 7: the latest end date in the first of these classes of durations that is present
     if chosen is None:
         oneDay = datetime.timedelta(days=1)
