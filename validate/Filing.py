@@ -811,8 +811,12 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             f.context for f in modelXbrl.factsByLocalName.get(disclosureSystem.deiDocumentPeriodEndDateElement, ())
             if f.context is not None and not f.isNil and disclosureSystem.deiNamespacePattern is not None and
                disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI)}
+        try: # the filing date bounds step 4d when the submission header supplies one
+            _filingDate = datetime.date.fromisoformat(edgarDateParamValue(val.params.get("filingDate")) or "")
+        except ValueError:
+            _filingDate = None
         val.requiredContext, val.requiredInstantContext, requiredContextStep = selectRequiredContext(
-            requiredContextEligible, submissionType, documentPeriodEndDateContexts)
+            requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate)
         headerDates = [d for d in (edgarDateParamValue(val.params.get("periodOfReport")),
                                    edgarDateParamValue(val.params.get("filingDate"))) if d]
         if requiredContextIneligibleStep or val.requiredContext is None:
@@ -4134,7 +4138,7 @@ def requiredContextEligibleContexts(contexts, headerCiks, isStandardNamespace):
     return eligible, None
 
 
-def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts):
+def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts, filingDate=None):
     """Select the required context by the ordering of contexts that defines it for EDGAR.
 
     EDGAR XBRL Guide (EXG) 3.1 states conditions for the required context.  On 2026-09-14 the EXG author
@@ -4154,7 +4158,9 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
          b. if exactly one of them holds a dei:DocumentPeriodEndDate fact, that one
          c. otherwise the longest, with durations rounded to the nearest multiple of 91 days (so 364 and 371
             days are both four quarters, and 46, 90 and 98 days are each one)
-         d. otherwise the latest end date among them
+         d. otherwise the latest end date among them, not after the filing date when one is known.  The bound is
+            our proposal, not yet the EXG author's: without it a forward-looking plan or award year, or a
+            mistyped future context, wins (nine proxies over March, May and August 2026, one tagging 2035)
          e. then order of appearance, as in step 8, which the EXG author calls the desperation fallback
          FAST and AM are not listed because each of their submission types is also in a listed set.  The
          period of report is not used: the header period becomes non-normative in 2027, registration
@@ -4176,6 +4182,7 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
                                      in order of appearance
       submissionType                 submission type, with any "\u00a7" form suffix, for step 4
       documentPeriodEndDateContexts  contexts holding a dei:DocumentPeriodEndDate fact, for step 4b
+      filingDate                     the submission's filing date as a datetime.date, or None, bounding step 4d
 
     Returns (requiredContext, requiredInstantContext, step), where step is the step that decided the
     required context ("4b", "4c", "4d", "4e", "5", "6", "7" or "8"), or (None, None, None) when no eligible
@@ -4203,8 +4210,15 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
             else:
                 quarters = max(round(days(c) / 91) for c in window)  # 4c
                 longest = [c for c in window if round(days(c) / 91) == quarters]
-                latestEnd = max(c.endDatetime for c in longest)  # 4d
-                latestEnding = [c for c in longest if c.endDatetime == latestEnd]
+                def lastDay(cntx):  # a date-only end date is held as the following midnight
+                    end = cntx.endDatetime
+                    if getattr(end, "dateOnly", (end.hour, end.minute, end.second, end.microsecond) == (0, 0, 0, 0)):
+                        end = end - datetime.timedelta(days=1)
+                    return end.date()
+                # 4d: only durations ending by the filing date, when one is known and any does
+                bounded = [c for c in longest if filingDate is None or lastDay(c) <= filingDate] or longest
+                latestEnd = max(c.endDatetime for c in bounded)
+                latestEnding = [c for c in bounded if c.endDatetime == latestEnd]
                 chosen = latestEnding[0]  # 4e: order of appearance
                 step = "4c" if len(longest) == 1 else "4d" if len(latestEnding) == 1 else "4e"
     # steps 5 to 7: the latest end date in the first of these classes of durations that is present
