@@ -820,9 +820,17 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
         val.requiredInstantContext = None # step 9 dropped by the EXG author, 2026-09-18
         _periodOfReport = edgarDateParamValue(val.params.get("periodOfReport"))
         # EXG 3.1.2 as the EXG author put it on 2026-09-18: a context ends on the period of report, or within
-        # a closed interval of 5 business days before to 1 business day after the filing date.  A prospectus or
-        # a fee exhibit is dated with the document it accompanies, which is filed a few days later.
-        _filingWindow = ((businessDayOffset(_filingDate, -5), businessDayOffset(_filingDate, 1))
+        # a closed interval of 5 business days before to 1 business day after the filing date; he offered
+        # [-6, +4] calendar days where business days cannot be determined reliably.  A prospectus or a fee
+        # exhibit is dated with the document it accompanies, which is filed a few days later.
+        # The check takes the wider of his two intervals, because EDGAR closes on days no holiday rule yields:
+        # of the 20 weekdays without filings in 2025-01..2026-08, Thursday 9 January 2025 was the national day
+        # of mourning for President Carter, and 24 and 26 December 2025 were also closed, all by executive
+        # order.  Computed business days count those as open, which would narrow the window and could report a
+        # filing that is in fact within it.  Selection keeps the business-day bound alone, where a tighter
+        # interval is what excludes a forward-dated context.
+        _filingWindow = ((min(businessDayOffset(_filingDate, -5), _filingDate - datetime.timedelta(days=6)),
+                          max(businessDayOffset(_filingDate, 1), _filingDate + datetime.timedelta(days=4)))
                          if _filingDate is not None else None)
         headerDates = [d for d in (_periodOfReport, edgarDateParamValue(val.params.get("filingDate"))) if d]
         if requiredContextIneligibleStep or val.requiredContext is None:
@@ -848,7 +856,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 modelObject=modelXbrl, documentType=deiDocumentType,
                 headerDates=" or ".join(text for text in (
                     "{} (the period of report)".format(_periodOfReport) if _periodOfReport else None,
-                    "{}..{} (5 business days before to 1 after the filing date {})".format(
+                    "{}..{} (5 business days or 6 calendar days before, to 1 business or 4 calendar days after, the filing date {})".format(
                         _filingWindow[0].isoformat(), _filingWindow[1].isoformat(), _filingDate.isoformat())
                     if _filingWindow is not None else None) if text))
         if val.params.get("logRequiredContext") is True: # one record per filing, for batch analysis
@@ -4179,10 +4187,20 @@ def usFederalHolidaysObserved(year):
     return observed
 
 
+# Weekdays on which EDGAR assigned no filing date although they are not federal holidays, observed in the
+# EDGAR XBRL feeds for 2025-01 through 2026-08.  Federal offices closed by executive order on each: 9 January
+# 2025 was the national day of mourning for President Carter, and 24 and 26 December 2025 adjoined Christmas.
+# Such closures cannot be derived from any rule, so this list is evidence and will need extending; a date
+# wrongly present only widens a tolerance window, which is the safe direction.
+EDGAR_OBSERVED_CLOSURES = frozenset({
+    datetime.date(2025, 1, 9), datetime.date(2025, 12, 24), datetime.date(2025, 12, 26)})
+
+
 def businessDayOffset(date, offset):
-    """`date` shifted by `offset` business days, skipping weekends and observed US federal holidays."""
+    """`date` shifted by `offset` business days, skipping weekends, federal holidays and observed closures."""
     step = 1 if offset >= 0 else -1
-    holidays = usFederalHolidaysObserved(date.year) | usFederalHolidaysObserved(date.year + step)
+    holidays = (usFederalHolidaysObserved(date.year) | usFederalHolidaysObserved(date.year + step)
+                | EDGAR_OBSERVED_CLOSURES)
     remaining = abs(offset)
     while remaining > 0:
         date += datetime.timedelta(days=step)
