@@ -642,9 +642,16 @@ def rssItemValidated(val, modelXbrl, rssItem, *args, **kwargs):
 
 def testcaseVariationXbrlLoaded(testcaseModelXbrl, instanceModelXbrl, modelTestcaseVariation, *args, **kwargs):
     # Validate of RSS feed item or testcase variation (simulates filing & cmd line load events
+    # An instance that failed to load has modelDocument None, which the events above test for before using it.
+    # Without the same test here the dereference raised AttributeError on the filing setup path and the filing
+    # was lost with no message of its own.  It is reached whenever the document cannot be obtained, so the
+    # forms affected follow availability rather than structure: over the EDGAR feeds of January 2025 to August
+    # 2026 it dropped 181 filings, 10-Q and 8-K alongside S-8, SC TO-I, 485BPOS and the 424 series.  The load
+    # failure is the substantive error and is reported by whatever detected it.
     modelManager = instanceModelXbrl.modelManager
     if (hasattr(testcaseModelXbrl, "efmOptions") and
         modelManager.validateDisclosureSystem and getattr(modelManager.disclosureSystem, "EFMplugin", False) and
+        instanceModelXbrl.modelDocument and  # None when the instance did not load
         instanceModelXbrl.modelDocument.type in (Type.INSTANCE, Type.INLINEXBRL, Type.INLINEXBRLDOCUMENTSET)):
         cntlr = modelManager.cntlr
         options = testcaseModelXbrl.efmOptions
@@ -669,6 +676,7 @@ def testcaseVariationXbrlLoaded(testcaseModelXbrl, instanceModelXbrl, modelTestc
 def testcaseVariationXbrlValidated(testcaseModelXbrl, instanceModelXbrl, *args, **kwargs):
     modelManager = instanceModelXbrl.modelManager
     if (hasattr(modelManager, "efmFiling") and
+        instanceModelXbrl.modelDocument and  # None when the instance did not load
         instanceModelXbrl.modelDocument.type in (Type.INSTANCE, Type.INLINEXBRL, Type.INLINEXBRLDOCUMENTSET)):
         efmFiling = modelManager.efmFiling
         _report = efmFiling.getReport(instanceModelXbrl)
@@ -679,6 +687,7 @@ def testcaseVariationXbrlValidated(testcaseModelXbrl, instanceModelXbrl, *args, 
 def testcaseVariationValidated(testcaseModelXbrl, instanceModelXbrl, errors=None, *args, **kwargs):
     modelManager = instanceModelXbrl.modelManager
     if (hasattr(modelManager, "efmFiling") and
+        instanceModelXbrl.modelDocument and  # None when the instance did not load
         instanceModelXbrl.modelDocument.type in (Type.INSTANCE, Type.INLINEXBRL, Type.INLINEXBRLDOCUMENTSET)):
         efmFiling = modelManager.efmFiling
         if isinstance(errors, list):
