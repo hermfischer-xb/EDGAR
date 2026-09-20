@@ -155,7 +155,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     val.fileNameDate = None
     val.entityRegistrantName = None
     val.requiredContext = None
-    val.requiredInstantContext = None # instant at the end date of the required context (required context ordering step 9)
+    val.requiredInstantContext = None # step 9 was dropped by the EXG author 2026-09-18; None for any reader that remains
     deiDocumentType = None # needed for non-instance validation too
     # efmSubmissionType and efmIxdsType are already set when re-validating after redaction/redline removal
     submissionType = getattr(modelXbrl,'efmSubmissionType', val.params.get("submissionType", ""))
@@ -811,14 +811,20 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             f.context for f in modelXbrl.factsByLocalName.get(disclosureSystem.deiDocumentPeriodEndDateElement, ())
             if f.context is not None and not f.isNil and disclosureSystem.deiNamespacePattern is not None and
                disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI)}
-        try: # the filing date bounds step 4d when the submission header supplies one
+        try: # the filing date bounds the selection, and the EXG 3.1.2 check below
             _filingDate = datetime.date.fromisoformat(edgarDateParamValue(val.params.get("filingDate")) or "")
         except ValueError:
             _filingDate = None
-        val.requiredContext, val.requiredInstantContext, requiredContextStep = selectRequiredContext(
+        val.requiredContext, requiredContextStep = selectRequiredContext(
             requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate)
-        headerDates = [d for d in (edgarDateParamValue(val.params.get("periodOfReport")),
-                                   edgarDateParamValue(val.params.get("filingDate"))) if d]
+        val.requiredInstantContext = None # step 9 dropped by the EXG author, 2026-09-18
+        _periodOfReport = edgarDateParamValue(val.params.get("periodOfReport"))
+        # EXG 3.1.2 as the EXG author put it on 2026-09-18: a context ends on the period of report, or within
+        # a closed interval of 5 business days before to 1 business day after the filing date.  A prospectus or
+        # a fee exhibit is dated with the document it accompanies, which is filed a few days later.
+        _filingWindow = ((businessDayOffset(_filingDate, -5), businessDayOffset(_filingDate, 1))
+                         if _filingDate is not None else None)
+        headerDates = [d for d in (_periodOfReport, edgarDateParamValue(val.params.get("filingDate"))) if d]
         if requiredContextIneligibleStep or val.requiredContext is None:
             modelXbrl.error(("EFM.6.05.19", "GFM.1.02.18"),
                 _("A required context was not found for document type %(documentType)s: %(reason)s"),
@@ -830,16 +836,21 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                               _("no duration context remains once contexts with a custom axis are excluded.")))
         elif headerDates and not any(
                 c.isStartEndPeriod and c.endDatetime is not None and
-                XmlUtil.dateunionValue(c.endDatetime, subtractOneDay=True) in headerDates
+                (XmlUtil.dateunionValue(c.endDatetime, subtractOneDay=True) == _periodOfReport or
+                 (_filingWindow is not None and _filingWindow[0] <= contextLastDay(c) <= _filingWindow[1]))
                 for c in requiredContextEligible):
-            # EXG 3.1.2: a context ends on the period of report or the filing date of the submission header.
             # This compares the header with the facts; it does not select the required context, and it is made
             # only when the header gives one of those dates (a registration submission has no period of report).
             modelXbrl.error(("EFM.6.05.19", "GFM.1.02.18"),
                 _("No context that could be the required context for document type %(documentType)s ends on "
                   "%(headerDates)s, given by the submission header."),
                 edgarCode="cp-0519-Required-Context",
-                modelObject=modelXbrl, documentType=deiDocumentType, headerDates=" or ".join(headerDates))
+                modelObject=modelXbrl, documentType=deiDocumentType,
+                headerDates=" or ".join(text for text in (
+                    "{} (the period of report)".format(_periodOfReport) if _periodOfReport else None,
+                    "{}..{} (5 business days before to 1 after the filing date {})".format(
+                        _filingWindow[0].isoformat(), _filingWindow[1].isoformat(), _filingDate.isoformat())
+                    if _filingWindow is not None else None) if text))
         if val.params.get("logRequiredContext") is True: # one record per filing, for batch analysis
             _documentTypeFacts = modelXbrl.factsByLocalName.get("DocumentType", ())
             _rc = val.requiredContext
@@ -4138,6 +4149,56 @@ def requiredContextEligibleContexts(contexts, headerCiks, isStandardNamespace):
     return eligible, None
 
 
+def usFederalHolidaysObserved(year):
+    """The US federal holidays of `year`, on the dates EDGAR observes them.
+
+    EDGAR assigns no filing date to a weekend or a federal holiday, so business-day arithmetic on a filing
+    date needs the observed dates: a holiday falling on a Saturday is observed on the Friday before and one
+    falling on a Sunday on the Monday after (5 U.S.C. 6103).  Juneteenth became a holiday in 2021.
+    """
+    def nthWeekday(month, weekday, n):  # the n-th such weekday of the month, 1-based
+        first = datetime.date(year, month, 1)
+        return first + datetime.timedelta(days=(weekday - first.weekday()) % 7 + 7 * (n - 1))
+
+    def lastWeekday(month, weekday):
+        last = datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)
+        return last - datetime.timedelta(days=(last.weekday() - weekday) % 7)
+
+    holidays = [datetime.date(year, 1, 1), nthWeekday(1, 0, 3), nthWeekday(2, 0, 3), lastWeekday(5, 0),
+                datetime.date(year, 7, 4), nthWeekday(9, 0, 1), nthWeekday(10, 0, 2),
+                datetime.date(year, 11, 11), nthWeekday(11, 3, 4), datetime.date(year, 12, 25)]
+    if year >= 2021:
+        holidays.append(datetime.date(year, 6, 19))
+    observed = set()
+    for holiday in holidays:
+        if holiday.weekday() == 5:    # Saturday, observed on the Friday before
+            holiday -= datetime.timedelta(days=1)
+        elif holiday.weekday() == 6:  # Sunday, observed on the Monday after
+            holiday += datetime.timedelta(days=1)
+        observed.add(holiday)
+    return observed
+
+
+def businessDayOffset(date, offset):
+    """`date` shifted by `offset` business days, skipping weekends and observed US federal holidays."""
+    step = 1 if offset >= 0 else -1
+    holidays = usFederalHolidaysObserved(date.year) | usFederalHolidaysObserved(date.year + step)
+    remaining = abs(offset)
+    while remaining > 0:
+        date += datetime.timedelta(days=step)
+        if date.weekday() < 5 and date not in holidays:
+            remaining -= 1
+    return date
+
+
+def contextLastDay(cntx):
+    """The last day of a context's period, as a date; a date-only end date is held as the following midnight."""
+    end = cntx.endDatetime
+    if getattr(end, "dateOnly", (end.hour, end.minute, end.second, end.microsecond) == (0, 0, 0, 0)):
+        end = end - datetime.timedelta(days=1)
+    return end.date()
+
+
 def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts, filingDate=None):
     """Select the required context by the ordering of contexts that defines it for EDGAR.
 
@@ -4158,9 +4219,7 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
          b. if exactly one of them holds a dei:DocumentPeriodEndDate fact, that one
          c. otherwise the longest, with durations rounded to the nearest multiple of 91 days (so 364 and 371
             days are both four quarters, and 46, 90 and 98 days are each one)
-         d. otherwise the latest end date among them, not after the filing date when one is known.  The bound is
-            our proposal, not yet the EXG author's: without it a forward-looking plan or award year, or a
-            mistyped future context, wins (nine proxies over March, May and August 2026, one tagging 2035)
+         d. otherwise the latest end date among them
          e. then order of appearance, as in step 8, which the EXG author calls the desperation fallback
          FAST and AM are not listed because each of their submission types is also in a listed set.  The
          period of report is not used: the header period becomes non-normative in 2027, registration
@@ -4170,11 +4229,18 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
       6. The latest end date among durations of less than 28 days.
       7. The latest end date among durations of more than 371 days.
       8. Order of appearance in the instance.
-      9. The required instant: the instant at the end date of the required context, with the same entity
-         identifier and dimensions.
 
-    The required context is a duration, so step 3 and those after it apply to duration contexts, and
-    instants enter only at step 9.
+    Before step 3, contexts ending more than one business day after the filing date are excluded, when a
+    filing date is known and any context survives the exclusion.  This is the EXG author's bound of
+    2026-09-18 ("the end date of the required context should never be significantly later than the filing
+    date... such contexts could be excluded from consideration at an earlier step"), which he put at a closed
+    interval of [-5, +1] business days where business days can be determined, as they can here.  Without it a
+    forward-looking plan or award year, or a mistyped future context, wins step 4d: nine proxies over March,
+    May and August 2026, one of them tagging 2035.
+
+    The required context is a duration, so step 3 and those after it apply to duration contexts.  Instants are
+    never selected: the EXG author dropped step 9, the instant at the required context's end date, on
+    2026-09-18, the public float that might have used it now being covered by a rule of its own.
 
     Arguments are plain values rather than the validation state, so that the selection can be unit tested
     against constructed context objects instead of by loading a filing:
@@ -4182,17 +4248,23 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
                                      in order of appearance
       submissionType                 submission type, with any "\u00a7" form suffix, for step 4
       documentPeriodEndDateContexts  contexts holding a dei:DocumentPeriodEndDate fact, for step 4b
-      filingDate                     the submission's filing date as a datetime.date, or None, bounding step 4d
+      filingDate                     the submission's filing date as a datetime.date, or None; contexts
+                                     ending more than one business day after it are excluded
 
-    Returns (requiredContext, requiredInstantContext, step), where step is the step that decided the
-    required context ("4b", "4c", "4d", "4e", "5", "6", "7" or "8"), or (None, None, None) when no eligible
-    context is a duration.  Step 4c decides when one duration is longest, 4d when several are equally long and
+    Returns (requiredContext, step), where step is the step that decided the required context ("4b", "4c",
+    "4d", "4e", "5", "6", "7" or "8"), or (None, None) when no eligible context is a duration.  Step 4c decides when one duration is longest, 4d when several are equally long and
     one of them ends latest, and 4e when equally long durations also end on the same date.
     """
+    if filingDate is not None:  # the EXG author's bound, applied before the ordering rather than within it
+        latestAllowed = businessDayOffset(filingDate, 1)
+        withinBound = [c for c in eligibleContexts
+                       if c.endDatetime is None or contextLastDay(c) <= latestAllowed]
+        if withinBound:  # a filing whose every context ends later keeps them, to select rather than fail
+            eligibleContexts = withinBound
     durations = [c for c in eligibleContexts
                  if c.isStartEndPeriod and c.startDatetime is not None and c.endDatetime is not None]
     if not durations:
-        return None, None, None
+        return None, None
     # step 3: fewest standard dimensions
     fewest = min(len(c.qnameDims) for c in durations)
     durations = [c for c in durations if len(c.qnameDims) == fewest]
@@ -4210,15 +4282,8 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
             else:
                 quarters = max(round(days(c) / 91) for c in window)  # 4c
                 longest = [c for c in window if round(days(c) / 91) == quarters]
-                def lastDay(cntx):  # a date-only end date is held as the following midnight
-                    end = cntx.endDatetime
-                    if getattr(end, "dateOnly", (end.hour, end.minute, end.second, end.microsecond) == (0, 0, 0, 0)):
-                        end = end - datetime.timedelta(days=1)
-                    return end.date()
-                # 4d: only durations ending by the filing date, when one is known and any does
-                bounded = [c for c in longest if filingDate is None or lastDay(c) <= filingDate] or longest
-                latestEnd = max(c.endDatetime for c in bounded)
-                latestEnding = [c for c in bounded if c.endDatetime == latestEnd]
+                latestEnd = max(c.endDatetime for c in longest)  # 4d
+                latestEnding = [c for c in longest if c.endDatetime == latestEnd]
                 chosen = latestEnding[0]  # 4e: order of appearance
                 step = "4c" if len(longest) == 1 else "4d" if len(latestEnding) == 1 else "4e"
     # steps 5 to 7: the latest end date in the first of these classes of durations that is present
@@ -4236,11 +4301,7 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
     # step 8: order of appearance
     if chosen is None:
         chosen, step = durations[0], "8"
-    # step 9: the required instant
-    requiredInstant = next((c for c in eligibleContexts
-                            if c.isInstantPeriod and c.endDatetime == chosen.endDatetime and
-                               c.isEntityIdentifierEqualTo(chosen) and c.dimsHash == chosen.dimsHash), None)
-    return chosen, requiredInstant, step
+    return chosen, step
 
 
 def contextPeriodText(cntx):
