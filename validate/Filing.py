@@ -818,6 +818,18 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
         val.requiredContext, requiredContextStep = selectRequiredContext(
             requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate)
         val.requiredInstantContext = None # step 9 dropped by the EXG author, 2026-09-18
+        # MEASUREMENT ONLY, logged and never acted on: what the ordering would choose if step 4b did not
+        # consult dei:DocumentPeriodEndDate.  The EXG author's principle is that no OPTIONAL fact should
+        # bear on identifying the required context, and DocumentPeriodEndDate is optional for the PX and
+        # EBP submission sets (dei-validations.json), which is where step 4b can decide.  Passing an empty
+        # set makes 4b's "exactly one duration holds it" test fail, so the ordering falls through to 4c/4d/4e
+        # exactly as removing the step would.  val.requiredContext is untouched.
+        # The eligible set and the filing date are the SAME objects passed to the real call above, so the
+        # business-day bound of f7558fc applies identically to both; the only difference is that 4b cannot fire.
+        # NB: not "_" for an unused name -- "_" is the gettext function in this module, and binding it makes
+        # Python treat every _("...") in this function as a local, raising UnboundLocalError per filing.
+        _noDpedContext, _noDpedStep = selectRequiredContext(
+            requiredContextEligible, submissionType, frozenset(), _filingDate)
         _periodOfReport = edgarDateParamValue(val.params.get("periodOfReport"))
         # EXG 3.1.2 as the EXG author put it on 2026-09-18: a context ends on the period of report, or within
         # a closed interval of 5 business days before to 1 business day after the filing date; he offered
@@ -868,7 +880,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                   "%(standardDimensions)s standard dimensions), instant %(instantContextID)s, "
                   "submission type %(submissionType)s, header dates %(headerDates)s, DocumentPeriodEndDate "
                   "contexts %(documentPeriodEndDateContexts)s; DocumentType in it: %(documentTypeIn)s, "
-                  "DocumentType contexts: %(documentTypeContexts)s."),
+                  "DocumentType contexts: %(documentTypeContexts)s; without step 4b: %(noDpedContextID)s "
+                  "at step %(noDpedStep)s."),
                 modelObject=_rc if _rc is not None else modelXbrl,
                 step=requiredContextIneligibleStep or requiredContextStep or "(none)",
                 # how step 1 was met: a header CIK, the all-zeroes fallback, or not checked for lack of header CIKs
@@ -883,7 +896,10 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 submissionType=submissionType or "(none)", headerDates=", ".join(headerDates) or "(none)",
                 documentPeriodEndDateContexts=", ".join(sorted(c.id for c in documentPeriodEndDateContexts)) or "(none)",
                 documentTypeIn="yes" if any(f.context is _rc for f in _documentTypeFacts) and _rc is not None else "no",
-                documentTypeContexts=", ".join(sorted({f.contextID for f in _documentTypeFacts})) or "(none)")
+                documentTypeContexts=", ".join(sorted({f.contextID for f in _documentTypeFacts})) or "(none)",
+                # measurement only: the selection had step 4b not consulted dei:DocumentPeriodEndDate
+                noDpedContextID=getattr(_noDpedContext, "id", "(none)"),
+                noDpedStep=_noDpedStep or "(none)")
         if val.params.get("requiredContextShadow") == "cover": # log-only comparison selection, for batch analysis
             _deiFacts = {"DocumentType": [], "DocumentPeriodEndDate": [], "EntityCentralIndexKey": []}
             for _localName, _facts in _deiFacts.items():
