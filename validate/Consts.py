@@ -38,7 +38,7 @@ docTypesRequiringPeriodOfReport = {"10", "10-K", "10-Q", "20-F", "40-F", "6-K", 
     "N-CSR", "N-CSRS", "N-Q", "N-CSR/A", "N-CSRS/A", "N-Q/A", "K SDR", "L SDR" }
 
 # EDGAR XBRL Guide (EXG) Table 6-1 submission sets for which step 4 of the required context ordering
-# applies (see Filing.selectRequiredContext).  Types are listed without the Table 6-2 "#" form and "%"
+# applies (see RequiredContext.selectRequiredContext).  Types are listed without the Table 6-2 "#" form and "%"
 # exhibit suffixes.  EBP is published as "11K, 11-K/A, 11-KT, 11-K", read here as 11-K, 11-K/A, 11-KT and
 # 11-KT/A.  SD and SDR also carry the document types given in place of the submission type when previewing
 # on the desktop ("2.01 SD", "K SDR", "L SDR"), as in dei-validations.json.
