@@ -42,6 +42,7 @@ from .Consts import submissionTypesAllowingSeriesClasses, \
                     nsPatternNotAllowedinxBRLXML, subTypesWarningforxBRLXml
 
 from .Dimensions import checkFilingDimensions
+from .MessageReferences import messageSectionArgs, messageEdgarCode, messageCode
 from .PreCalAlignment import checkCalcsTreeWalk
 from .RequiredContext import edgarDateParamValue, requiredContextEligibleContexts, businessDayOffset, \
                                contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext
@@ -111,7 +112,6 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     styleIxHiddenPattern = re.compile(r"(.*[^\w]|^)-sec-ix-hidden\s*:\s*([\w.-]+).*")
     styleIxRedactPattern = re.compile(r"(.*;)?\s*-sec-ix-redact\s*:\s*true(?:\s*;)?\s*([\w.-].*)?$")
     efmRoleDefinitionPattern = re.compile(r"([0-9]+) - (Statement|Disclosure|Schedule|Document) - (.+)")
-    messageKeySectionPattern = re.compile(r"(.*[{]efmSection[}]|[a-z]{2}-[0-9]{4}|dq-)(.*)")
     secDomainPattern = re.compile(r"(fasb\.org|xbrl\.sec\.gov)")
 
     val._isStandardUri = {}
@@ -1228,55 +1228,16 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                     if n.lower().endswith("tag"):
                         if isinstance(v, list):
                             logArgs[n] = "".join(v)
-                if "efmSection" not in logArgs and not sev.get("msgSection"):
-                    logArgs["efmSection"] = sev.get("efm")
-                if logArgs.get("efmSection"):
-                    efm = logArgs["efmSection"].split(".")
-                    logArgs["efmSection"] = ""
-                    logArgs["arelleCode"] = "EFM"
-                    for i, e in enumerate(efm):
-                        if i > 0 :
-                            if e.isnumeric(): # e.g. [6,5,2] -> "6.05.02"
-                                e = e.zfill(2)
-                        logArgs["efmSection"] += e
-                        logArgs["arelleCode"] += "." + e
-
-                # replacement for efmSection. Based on sev msgSection
-                if sev.get("msgSection"):
-                    msgPrefix, _sep, msgSectionNumber = sev["msgSection"].partition(":")
-                    logArgs["arelleCode"] = msgPrefix
-                    section = f"{msgPrefix.lower()}Section"
-                    logArgs[section] = ""
-                    for i, e in enumerate(msgSectionNumber.split(".")):
-                        if i > 0 :
-                            if e.isnumeric(): # e.g. [6,5,2] -> "6.05.02"
-                                e = e.zfill(2)
-                        logArgs["arelleCode"] += "." + e
-                        logArgs[section] += e
-
-                logArgs["edgarCode"] = messageKey # edgar code is the un-expanded key for message with {...}'s
-                if "-{efmSection}" in logArgs["edgarCode"] and not logArgs.get("efmSection") and logArgs.get("exgSection"):
-                    logArgs["edgarCode"] = logArgs["edgarCode"].replace("-{efmSection}", "")
-
+                # the entry's EFM and other-guide (msgSection) references, as arguments and as the code (see MessageReferences)
+                logArgs.update(messageSectionArgs(logArgs.get("efmSection", sev.get("efm")), sev.get("msgSection")))
+                logArgs["edgarCode"] = messageEdgarCode(messageKey, logArgs.get("arelleCode")) # edgar code is the un-expanded key for message with {...}'s
                 try:
-                    m = messageKeySectionPattern.match(messageKey or "")
-                    if m:
-                        keyAfterSection = m.group(2)
-                    else:
-                        keyAfterSection = ""
-                    arelleCode = "{arelleCode}.".format(**logArgs) + keyAfterSection.format(**logArgs) \
-                                  .replace(",", "").replace(".","").replace(" ","") # replace commas in names embedded in message code portion
-                    if arelleCode.endswith("."):
-                        arelleCode = arelleCode[:-1]
+                    arelleCode = messageCode(messageKey, logArgs)
                 except KeyError as err:
                     modelXbrl.error("arelle:loadDeiValidations",
                                     _("Missing field %(field)s from messageKey %(messageKey)s, validation %(validation)s."),
                                     field=err, messageKey=messageKey, validation=sev)
                     return
-                arelleCodeSections = arelleCode.split("-")
-                if len(arelleCodeSections) > 1 and arelleCodeSections[1]:
-                    arelleCodeSections[1] = arelleCodeSections[1][0].lower() + arelleCodeSections[1][1:] # start with lowercase
-                arelleCode = "".join(arelleCodeSections)
                 axisKey = sev.get("axis","")
                 axesValidations = deiValidations["axis-validations"][axisKey]
                 logArgs["axis"] = " or ".join(axesValidations.get("names") or axesValidations.get("axes")) # names in ft-validations axes in dei-validations
