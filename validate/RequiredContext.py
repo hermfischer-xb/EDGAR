@@ -113,7 +113,57 @@ def contextLastDay(cntx):
     return end.date()
 
 
-def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts, filingDate=None):
+# dei-validations.json validation codes under which a fact is required, or optional, for a submission type
+FACT_REQUIRED_VALIDATIONS = frozenset({"r", "de", "de5pm"})
+FACT_OPTIONAL_VALIDATIONS = frozenset({"o"})
+
+
+def documentPeriodEndDateRequired(sevs, localName, submissionType, deiDocumentType, attachmentDocumentType):
+    """Whether dei:DocumentPeriodEndDate is required for this submission, according to dei-validations.json.
+
+    False only when an entry applying to the submission makes the fact optional and none makes it required;
+    True otherwise, including when no entry applies, so that step 4b keeps its effect wherever the table is silent.
+
+    An entry applies by the same test as the sub-type-element-validations loop in Filing.py: its compiled
+    sub-types include the submission type, or the submission type with the dei:DocumentType as "\u00a7" suffix
+    (reversed by "!not!"), or its sub-types are "all" or "n/a", subject to its sub-types pattern and document
+    types.  That test is repeated here rather than shared, so as not to restructure the loop; a change to one
+    should be made to the other.
+
+      sevs                    deiValidations["sub-type-element-validations"]
+      localName               local name of the DocumentPeriodEndDate element (disclosure system setting)
+      submissionType          submission type, with any "\u00a7" suffix, as the loop in Filing.py uses it
+      deiDocumentType         value of dei:DocumentType, or None
+      attachmentDocumentType  attachment document type, or None
+    """
+    formsToMatch = {submissionType, "{}\u00a7{}".format(submissionType, deiDocumentType)}
+    required = optional = False
+    for sev in sevs:
+        validation = sev.get("validation")
+        if validation not in FACT_REQUIRED_VALIDATIONS and validation not in FACT_OPTIONAL_VALIDATIONS:
+            continue
+        names = sev.get("xbrl-names", ())
+        if isinstance(names, str):
+            names = (names,)
+        if not any(name and name.rpartition(":")[2] == localName for name in names):
+            continue
+        subTypes = sev.get("subTypeSet", frozenset())
+        subTypesPattern = sev.get("subTypesPattern")
+        docTypes = sev.get("docTypes")
+        notApplicable = (subTypes not in ({"all"}, {"n/a"})
+                         and (formsToMatch.isdisjoint(subTypes) ^ ("!not!" in subTypes))
+                         and (not subTypesPattern or not subTypesPattern.match(submissionType))
+                         and (not docTypes or ((attachmentDocumentType is not None and
+                                                any(attachmentDocumentType.startswith(dt) for dt in docTypes))
+                                               ^ ("!not!" in docTypes))))
+        if not notApplicable:
+            required |= validation in FACT_REQUIRED_VALIDATIONS
+            optional |= validation in FACT_OPTIONAL_VALIDATIONS
+    return not (optional and not required)
+
+
+def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts, filingDate=None,
+                          documentPeriodEndDateRequired=True):
     """Select the required context by the ordering of contexts that defines it for EDGAR.
 
     EDGAR XBRL Guide (EXG) 3.1 states conditions for the required context.  On 2026-09-14 the EXG author
@@ -130,7 +180,8 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
       3. The fewest standard dimensions, typically but not necessarily none.
       4. If the submission is in set 6K, 8K, AF, EBP, HF, OA, PX, QF, RF, SE, TF or TO (EXG Table 6-1):
          a. durations of 28 to 371 days; if there are none, continue at step 5
-         b. if exactly one of them holds a dei:DocumentPeriodEndDate fact, that one
+         b. if exactly one of them holds a dei:DocumentPeriodEndDate fact, that one, where the submission type
+            requires the fact
          c. otherwise the longest, with durations rounded to the nearest multiple of 91 days (so 364 and 371
             days are both four quarters, and 46, 90 and 98 days are each one)
          d. otherwise the latest end date among them
@@ -139,6 +190,11 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
          period of report is not used: the header period becomes non-normative in 2027, registration
          submissions have none, and dei:DocumentPeriodEndDate's value is itself a fact of the required
          context.  Step 4b is applied among the durations of step 4a.
+         Step 4b is skipped where dei-validations.json makes dei:DocumentPeriodEndDate optional for the submission
+         type (the proxies, POS AM, POS EX and the 11-K family), following the EXG author's principle of
+         2026-09-18 that a fact whose presence or absence causes no message must not identify the required
+         context.  Over twenty months of the EDGAR XBRL feeds (2025-01 to 2026-08), 196 filings of those types
+         were decided at 4b, and all 196 select the same context without it.
       5. The latest end date among durations of exactly 24 hours.
       6. The latest end date among durations of less than 28 days.
       7. The latest end date among durations of more than 371 days.
@@ -164,6 +220,8 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
       documentPeriodEndDateContexts  contexts holding a dei:DocumentPeriodEndDate fact, for step 4b
       filingDate                     the submission's filing date as a datetime.date, or None; contexts
                                      ending more than one business day after it are excluded
+      documentPeriodEndDateRequired  False where the submission type makes dei:DocumentPeriodEndDate optional
+                                     (documentPeriodEndDateRequired()), which skips step 4b
 
     Returns (requiredContext, step), where step is the step that decided the required context ("4b", "4c",
     "4d", "4e", "5", "6", "7" or "8"), or (None, None) when no eligible context is a duration.  Step 4c decides when one duration is longest, 4d when several are equally long and
@@ -191,7 +249,7 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
         window = [c for c in durations if 28 <= days(c) <= 371]  # 4a
         if window:
             withDocumentPeriodEndDate = [c for c in window if c in documentPeriodEndDateContexts]
-            if len(withDocumentPeriodEndDate) == 1:  # 4b
+            if documentPeriodEndDateRequired and len(withDocumentPeriodEndDate) == 1:  # 4b
                 chosen, step = withDocumentPeriodEndDate[0], "4b"
             else:
                 quarters = max(round(days(c) / 91) for c in window)  # 4c
