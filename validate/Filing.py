@@ -45,7 +45,8 @@ from .Dimensions import checkFilingDimensions
 from .MessageReferences import messageSectionArgs, messageEdgarCode, messageCode
 from .PreCalAlignment import checkCalcsTreeWalk
 from .RequiredContext import edgarDateParamValue, requiredContextEligibleContexts, businessDayOffset, \
-                               contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext
+                               contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext, \
+                               FEE_EXHIBIT_ANCHORS, selectFeeExhibitRequiredContext
 from .Util import conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
                     loadUgtRelQnames, loadDqcRules, \
@@ -817,8 +818,19 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             _filingDate = datetime.date.fromisoformat(edgarDateParamValue(val.params.get("filingDate")) or "")
         except ValueError:
             _filingDate = None
-        val.requiredContext, requiredContextStep = selectRequiredContext(
-            requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate)
+        if isFeeTagging: # a fee exhibit's required context is the context of its anchor facts (FEE_EXHIBIT_ANCHORS)
+            def _anchorContexts(localName):
+                return {f.context for f in modelXbrl.factsByLocalName.get(localName, ())
+                        if f.context is not None and not f.isNil and f.qname.namespaceURI is not None and
+                           (f.qname.namespaceURI.startswith("http://xbrl.sec.gov/ffd/") if localName == "FeeExhibitTp"
+                            else disclosureSystem.deiNamespacePattern is not None and
+                                 disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI))}
+            val.requiredContext, requiredContextStep = selectFeeExhibitRequiredContext(
+                requiredContextEligible, [(name, _anchorContexts(name)) for name in FEE_EXHIBIT_ANCHORS],
+                submissionType, documentPeriodEndDateContexts, _filingDate)
+        else:
+            val.requiredContext, requiredContextStep = selectRequiredContext(
+                requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate)
         val.requiredInstantContext = None # step 9 dropped by the EXG author, 2026-09-18
         _periodOfReport = edgarDateParamValue(val.params.get("periodOfReport"))
         # EXG 3.1.2 as the EXG author put it on 2026-09-18: a context ends on the period of report, or within

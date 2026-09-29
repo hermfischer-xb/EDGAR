@@ -218,6 +218,48 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
     return chosen, step
 
 
+# The facts whose context is a fee exhibit's required context, in order of precedence, as proposed to the EXG
+# author on 2026-09-20: ffd:FeeExhibitTp names the exhibit's own type, as dei:DocumentType does for a primary
+# document; dei:EntityCentralIndexKey (required by EFM 6.5.21) and dei:EntityRegistrantName follow.
+# ffd:SubmissnTp is optional for fee exhibits, so under the EXG author's principle it may not identify the
+# required context; it stays a cross-check of the accompanying submission's type.
+FEE_EXHIBIT_ANCHORS = ("FeeExhibitTp", "EntityCentralIndexKey", "EntityRegistrantName")
+
+
+def selectFeeExhibitRequiredContext(eligibleContexts, anchorContexts, submissionType,
+                                    documentPeriodEndDateContexts, filingDate=None):
+    """Select a fee exhibit's required context by its anchor facts, falling back to the ordering.
+
+    The first anchor, in FEE_EXHIBIT_ANCHORS order, whose facts sit in one or more eligible duration contexts
+    decides: one such context is the required context; several are put to selectRequiredContext, which
+    chooses among them only.  When no anchor fact sits in an eligible duration, selectRequiredContext chooses
+    among all eligible contexts as for any other submission.
+
+    The filing-date bound is not applied to an anchor's context: the anchor is the filer's own designation of
+    the exhibit's context, and a context ending after the filing date is then for the EXG 3.1.2 check to report
+    rather than for the selection to pass over.
+
+      eligibleContexts               contexts remaining after steps 1 and 2, in order of appearance
+      anchorContexts                 sequence of (anchor local name, set of contexts holding that fact), in
+                                     FEE_EXHIBIT_ANCHORS order
+      submissionType, documentPeriodEndDateContexts, filingDate
+                                     as for selectRequiredContext
+
+    Returns (requiredContext, step): step is "FE:" and the deciding anchor's local name, followed by "/" and
+    the ordering's step when the ordering chose among the anchor's contexts, or the ordering's own step when no
+    anchor decided.
+    """
+    for anchorName, contexts in anchorContexts:
+        anchored = [c for c in eligibleContexts
+                    if c in contexts and c.isStartEndPeriod and c.startDatetime is not None and c.endDatetime is not None]
+        if len(anchored) == 1:
+            return anchored[0], "FE:" + anchorName
+        if anchored:
+            chosen, step = selectRequiredContext(anchored, submissionType, documentPeriodEndDateContexts, None)
+            return chosen, "FE:{}/{}".format(anchorName, step)
+    return selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts, filingDate)
+
+
 def contextPeriodText(cntx):
     """Period of a context for log records: "start..end (N days)", "instant end", "forever", or "" for None."""
     if cntx is None:
