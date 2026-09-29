@@ -45,6 +45,7 @@ from .Dimensions import checkFilingDimensions
 from .MessageReferences import messageSectionArgs, messageEdgarCode, messageCode
 from .PreCalAlignment import checkCalcsTreeWalk
 from .RequiredContext import edgarDateParamValue, requiredContextEligibleContexts, businessDayOffset, \
+                               documentPeriodEndDateRequired, \
                                contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext
 from .Util import conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
@@ -817,8 +818,13 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             _filingDate = datetime.date.fromisoformat(edgarDateParamValue(val.params.get("filingDate")) or "")
         except ValueError:
             _filingDate = None
+        # step 4b applies only where the submission type requires dei:DocumentPeriodEndDate
+        _documentPeriodEndDateRequired = (not isEFM or documentPeriodEndDateRequired(
+            deiValidations["sub-type-element-validations"], disclosureSystem.deiDocumentPeriodEndDateElement,
+            submissionType, deiDocumentType, attachmentDocumentType))
         val.requiredContext, requiredContextStep = selectRequiredContext(
-            requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate)
+            requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate,
+            _documentPeriodEndDateRequired)
         val.requiredInstantContext = None # step 9 dropped by the EXG author, 2026-09-18
         _periodOfReport = edgarDateParamValue(val.params.get("periodOfReport"))
         # EXG 3.1.2 as the EXG author put it on 2026-09-18: a context ends on the period of report, or within
