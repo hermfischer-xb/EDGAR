@@ -215,11 +215,11 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                       "rptIncludeAllClassesFlag", "rptSeriesClassInfo.classIds", "newClass2.classIds",
                       "eligibleFundFlag", "pursuantGeneralInstructionFlag", "filerNewRegistrantFlag",
                       "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "rssItemParameters", "logRequiredContext",
-                      "requiredContextShadow", "messageCodes", "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
+                      "requiredContextShadow", "entitySets", "logInstanceTypes", "messageCodes", "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
     boolParameterNames = {"voluntaryFilerFlag", "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus",
                           "smallBusinessFlag", "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "rptIncludeAllSeriesFlag",
                           "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag",
-                          "rssItemParameters", "logRequiredContext"}
+                          "rssItemParameters", "logRequiredContext", "logInstanceTypes"}
     parameterEisFileTags = {
         "cik":["depositorId", "cik", "filerId"],
         "submissionType": "submissionType",
