@@ -813,7 +813,12 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
         val.exgInstanceTypes = resolveInstanceTypes(
             loadExgSets(modelXbrl), submissionType, deiDocumentType, attachmentDocumentType,
             entitySetsParameter=val.params.get("entitySets"),
-            fileNumbers=[n for n in (val.params.get("fileNumber"),) if n] + _deiFactValues("EntityFileNumber"),
+            # the feed item's file number reaches only the resolver: as the fileNumber parameter it would also
+            # change the fee-tagging checks that read header:fileNumber
+            fileNumbers=[n for n in (val.params.get("fileNumber"),
+                                     getattr(getattr(modelXbrl, "efmRssItem", None), "fileNumber", None)
+                                     if val.params.get("rssItemParameters") is True else None) if n] +
+                        _deiFactValues("EntityFileNumber"),
             invCompanyType=val.params.get("invCompanyType") or deiItems.get("EntityInvCompanyType"),
             taxonomyPrefixes={ns.split("/")[3] for ns in {f.qname.namespaceURI for f in modelXbrl.factsInInstance}
                               if ns and ns.startswith("http://xbrl.sec.gov/")})
