@@ -40,6 +40,8 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "rptSeriesClassInfo.classIds": ["C000000123", ...] # list of EDGAR classId values
    "newClass2.classIds": [] # //classId xpath result on submission headers
    "saveCoverFacts": test environment file into which to save JSON output
+   "rssItemParameters": true/false, # when validating an EDGAR RSS feed, take submissionType, cik, periodOfReport
+                                    # and filingDate for each filing from its feed item (explicit parameters take precedence)
    # CEF forms
    "eligibleFundFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
    "pursuantGeneralInstructionFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
@@ -196,11 +198,11 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                       "rptIncludeAllSeriesFlag", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds",
                       "rptIncludeAllClassesFlag", "rptSeriesClassInfo.classIds", "newClass2.classIds",
                       "eligibleFundFlag", "pursuantGeneralInstructionFlag", "filerNewRegistrantFlag",
-                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts",
+                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "rssItemParameters",
                       "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
     boolParameterNames = {"voluntaryFilerFlag", "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus",
                           "smallBusinessFlag", "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "rptIncludeAllSeriesFlag",
-                          "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag"}
+                          "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag", "rssItemParameters"}
     parameterEisFileTags = {
         "cik":["depositorId", "cik", "filerId"],
         "submissionType": "submissionType",
@@ -300,6 +302,22 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                         v = None
                 if v not in (None, ""):
                     val.params[paramName] = v # if not set uses prior value
+    # An EDGAR RSS feed item carries the submission header fields of its filing.  With the rssItemParameters
+    # parameter, they supply the header parameters of each filing validated from the feed, as EDGAR would have
+    # passed them; parameters given explicitly take precedence.
+    rssItem = getattr(val.modelXbrl, "efmRssItem", None)
+    if rssItem is not None and val.params.get("rssItemParameters") is True:
+        if rssItem.formType:
+            val.params.setdefault("submissionType", rssItem.formType)
+        if rssItem.cikNumber and not ({"CIK", "cik", "cikList", "cikNameList"} & val.params.keys()):
+            val.params["cik"] = rssItem.cikNumber.zfill(10)
+        # yyyy-mm-dd, whereas EDGAR passes periodOfReport as mm-dd-yyyy; the feed gives 1969-12-31 (epoch zero)
+        # for a submission without a period of report, which EDGAR would not pass
+        if rssItem.period and rssItem.period != "1969-12-31":
+            yyyy, mm, dd = rssItem.period.split("-")
+            val.params.setdefault("periodOfReport", f"{mm}-{dd}-{yyyy}")
+        if rssItem.filingDate: # datetime.date
+            val.params.setdefault("filingDate", rssItem.filingDate.strftime("%m-%d-%Y"))
     if "CIK" in val.params: # change to lower case key
         val.params["cik"] = val.params["CIK"]
         del val.params["CIK"]
@@ -597,6 +615,7 @@ def filingEnd(cntlr, options, filesource, entrypointFiles, sourceZipStream=None,
 
 def rssItemXbrlLoaded(modelXbrl, rssWatchOptions, rssItem, *args, **kwargs):
     # Validate of RSS feed item (simulates filing & cmd line load events
+    modelXbrl.efmRssItem = rssItem # submission header fields of the item, for rssItemParameters in validateXbrlStart
     if not hasattr(rssItem.modelXbrl, "efmOptions"): # may have already been set by EdgarRenderer in gui startup
         rssItem.modelXbrl.efmOptions = rssWatchOptions  # save options in rss's modelXbrl
     testcaseVariationXbrlLoaded(rssItem.modelXbrl, modelXbrl, None)
