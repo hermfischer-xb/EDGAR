@@ -49,7 +49,7 @@ from .RequiredContext import edgarDateParamValue, requiredContextEligibleContext
                                contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext, \
                                FEE_EXHIBIT_ANCHORS, selectFeeExhibitRequiredContext
 from .InstanceTypes import resolveInstanceTypes
-from .Util import loadExgSets, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
+from .Util import loadSetDefinitions, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
                     loadUgtRelQnames, loadDqcRules, \
                     loadTaxonomyCompatibility, loadIxTransformRegistries, ValueRange
@@ -811,7 +811,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                     if not f.isNil and f.xValue is not None and disclosureSystem.deiNamespacePattern is not None and
                        disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI)]
         val.exgInstanceTypes = resolveInstanceTypes(
-            loadExgSets(modelXbrl), submissionType, deiDocumentType, attachmentDocumentType,
+            loadSetDefinitions(modelXbrl), submissionType, deiDocumentType, attachmentDocumentType,
             entitySetsParameter=val.params.get("entitySets"),
             # the feed item's file number reaches only the resolver: as the fileNumber parameter it would also
             # change the fee-tagging checks that read header:fileNumber
@@ -827,7 +827,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             modelXbrl.info("EDGAR.instanceTypes",
                 _("Instance types %(instanceTypes)s (submission: %(submissionInstanceTypes)s); submission sets "
                   "%(submissionSets)s; entity sets %(entitySets)s, %(entitySetsSource)s%(disagreement)s%(unresolved)s; "
-                  "submission type %(submissionType)s, DocumentType %(documentType)s, attachment %(attachmentDocumentType)s."),
+                  "submission type %(submissionType)s (%(submissionTypeSource)s), DocumentType %(documentType)s, "
+                  "attachment document type %(attachmentDocumentType)s (%(attachmentDocumentTypeSource)s)."),
                 modelObject=modelXbrl,
                 instanceTypes=", ".join(_it["instanceTypes"]) or "(none)",
                 submissionInstanceTypes=", ".join(_it["submissionInstanceTypes"]) or "(none)",
@@ -838,7 +839,10 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                               if _it["entitySetsDisagreement"] else "") +
                              ("; unknown entity sets {}".format(_it["unknownEntitySets"]) if _it["unknownEntitySets"] else ""),
                 unresolved="; unresolved: " + "; ".join(_it["unresolved"]) if _it["unresolved"] else "",
-                submissionType=submissionType, documentType=deiDocumentType, attachmentDocumentType=attachmentDocumentType)
+                submissionType=submissionType, documentType=deiDocumentType, attachmentDocumentType=attachmentDocumentType,
+                # supplied by the caller (EDGAR, a filer, an RSS feed item), else inferred above from the instance
+                submissionTypeSource="supplied" if val.params.get("submissionType") else "inferred",
+                attachmentDocumentTypeSource="supplied" if val.params.get("attachmentDocumentType") else "inferred")
 
         #6.5.19 required context, by the EDGAR required context ordering (see selectRequiredContext)
         headerCiks = set(val.params.get("cikNameList") or ())

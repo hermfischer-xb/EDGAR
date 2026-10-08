@@ -10,8 +10,14 @@ EXG 1.1 defines three kinds of set, and section 3 scopes its rules by them:
   type code.  "Rows of the table are cumulative; that is, given a submission, every row that matches yields an
   instance type."
 
-The tables themselves are data, validate/resources/exg-sets.json, generated from the guide's Word source by
-extractSets.py; nothing here restates them.
+The tables are EXG 1.1 "Set Definitions", held as data in validate/resources/exg-set-definitions.json, which
+extractSets.py generates from the guide's Word source; nothing here restates them.  Names follow the guide's terms
+and Table 6-4's column headings: submissionSet(s), submissionTypes, entitySet(s) (includedEntitySet,
+excludedEntitySets), exhibitType, instanceType(s).
+
+EXG's exhibit type (Table 6-4: EX-FILING FEES, EX-98, EX-2.01, EX-99.K SDR, ...) is an EDGAR document type, so it is
+matched against the attachmentDocumentType parameter (or dei:DocumentType), not against the exhibitType parameter,
+which names the legal exhibit.
 
 Entity sets are a property of the registrant.  Inside EDGAR, where the registration database is available to the
 caller of Arelle, they are passed as the parameter entitySets.  Elsewhere they are determined from the submission
@@ -57,8 +63,8 @@ FORM_SUFFIX_MEANING = re.compile(r"The Form is an? (\S+?)\.?$")
 FORM_1_SUBMISSION_TYPES = {"1", "1/A", "1AA", "1AC", "1/A-A", "1/A-T", "1/S-M", "1/S-R", "1W"}
 
 
-def loadExgSets(stream):
-    """The exg-sets.json resource, from an open text stream."""
+def loadSetDefinitions(stream):
+    """The exg-set-definitions.json resource (EXG 1.1 Set Definitions), from an open text stream."""
     return json.load(stream)
 
 
@@ -88,7 +94,7 @@ def baseSubmissionType(submissionType):
     return (submissionType or "").partition("§")[0]
 
 
-def submissionSetsOf(exgSets, submissionType, documentType=None, attachmentDocumentType=None, invCompanyType=None):
+def submissionSetsOf(setDefinitions, submissionType, documentType=None, attachmentDocumentType=None, invCompanyType=None):
     """Submission sets (Table 6-1) the submission belongs to.
 
     Returns ({set code: the Table 6-1 entry that matched}, [unresolved suffix notes]).  An entry with a '#' suffix
@@ -97,10 +103,10 @@ def submissionSetsOf(exgSets, submissionType, documentType=None, attachmentDocum
     """
     submissionType = baseSubmissionType(submissionType)
     forms = formsInside(documentType, invCompanyType)
-    suffixMeanings = exgSets.get("submission-set-suffixes", {})
+    suffixMeanings = setDefinitions.get("submissionSetSuffixes", {})
     matched, unresolved = {}, []
-    for code, entry in exgSets.get("submission-sets", {}).items():
-        for submissionTypeEntry in entry.get("submission-types", ()):
+    for code, entry in setDefinitions.get("submissionSets", {}).items():
+        for submissionTypeEntry in entry.get("submissionTypes", ()):
             base, sep, suffix = _splitSuffix(submissionTypeEntry)
             if base != submissionType:
                 continue
@@ -132,11 +138,12 @@ def _splitSuffix(submissionTypeEntry):
 
 
 def parseEntitySetsParameter(value):
-    """The entitySets parameter: codes separated by commas or spaces, or a list of codes."""
+    """The entitySets parameter, Table 6-3 codes: a list in JSON (ELOparams), or one blank-separated string from a
+    formula or GUI parameter, as for the seriesIds parameters (validate/__init__.py splits those already)."""
     if value is None:
         return None
     if isinstance(value, str):
-        value = re.split(r"[\s,]+", value)
+        value = value.split()
     return {str(v).strip() for v in value if str(v).strip()}
 
 
@@ -237,7 +244,7 @@ def determineEntitySets(submissionSets, submissionType, documentType=None, attac
     return found
 
 
-def instanceTypesOf(exgSets, submissionSets, entitySets, attachmentDocumentType=None, documentType=None):
+def instanceTypesOf(setDefinitions, submissionSets, entitySets, attachmentDocumentType=None, documentType=None):
     """Instance types (Table 6-4) of the submission and of this instance.
 
     Returns (submissionInstanceTypes, instanceTypes): every matching row's instance type for the submission, and
@@ -246,23 +253,23 @@ def instanceTypesOf(exgSets, submissionSets, entitySets, attachmentDocumentType=
     its exhibit type, if any, is this instance.
     """
     submissionRows, exhibitRows, otherRows = [], [], []
-    for row in exgSets.get("instance-types", ()):
-        if row["submission-set"] not in submissionSets:
+    for row in setDefinitions.get("instanceTypes", ()):
+        if row["submissionSet"] not in submissionSets:
             continue
-        if row["entity-set"] != "ALL" and row["entity-set"] not in entitySets:
+        if row["includedEntitySet"] != "ALL" and row["includedEntitySet"] not in entitySets:
             continue
-        if any(x in entitySets for x in row.get("exclude-entity-sets", ())):
+        if any(x in entitySets for x in row.get("excludedEntitySets", ())):
             continue
-        exhibit = row.get("exhibit-type")
+        exhibit = row.get("exhibitType")
         if exhibit and not exhibitIn(exhibit, attachmentDocumentType, documentType):
             continue
-        submissionRows.append(row["instance-type"])
-        (exhibitRows if exhibit else otherRows).append(row["instance-type"])
+        submissionRows.append(row["instanceType"])
+        (exhibitRows if exhibit else otherRows).append(row["instanceType"])
     unique = lambda xs: list(dict.fromkeys(xs))
     return unique(submissionRows), unique(exhibitRows or otherRows)
 
 
-def resolveInstanceTypes(exgSets, submissionType, documentType=None, attachmentDocumentType=None,
+def resolveInstanceTypes(setDefinitions, submissionType, documentType=None, attachmentDocumentType=None,
                          entitySetsParameter=None, fileNumbers=(), invCompanyType=None, taxonomyPrefixes=()):
     """Submission sets, entity sets and instance types of a submission, with how each was decided.
 
@@ -271,13 +278,14 @@ def resolveInstanceTypes(exgSets, submissionType, documentType=None, attachmentD
       entitySets                {code: reason}; from the parameter when given ("parameter"), else determined
       entitySetsSource          "parameter" or "determined"
       determinedEntitySets      {code: reason}, always computed
-      entitySetsDisagreement    (only from parameter, only determined) when the parameter is given and differs
+      entitySetsDisagreement    (only from parameter, only determined) when the parameter is given and differs in
+                                an entity set that a Table 6-4 row of the submission's sets names
       unknownEntitySets         parameter codes that Table 6-3 does not define
       instanceTypes             this instance's instance types
       submissionInstanceTypes   every instance type the submission's matching rows yield
       unresolved                notes on suffixes the data uses that cannot be evaluated
     """
-    submissionSets, unresolved = submissionSetsOf(exgSets, submissionType, documentType, attachmentDocumentType,
+    submissionSets, unresolved = submissionSetsOf(setDefinitions, submissionType, documentType, attachmentDocumentType,
                                                   invCompanyType)
     determined = determineEntitySets(submissionSets, submissionType, documentType, attachmentDocumentType,
                                      fileNumbers, invCompanyType, set(taxonomyPrefixes))
@@ -287,8 +295,12 @@ def resolveInstanceTypes(exgSets, submissionType, documentType=None, attachmentD
         given = param | {"ALL"}
         result["entitySets"] = {code: "parameter" for code in sorted(given)}
         result["entitySetsSource"] = "parameter"
-        result["unknownEntitySets"] = sorted(given - set(exgSets.get("entity-sets", {})))
-        onlyParam, onlyDetermined = given - set(determined), set(determined) - given
+        result["unknownEntitySets"] = sorted(given - set(setDefinitions.get("entitySets", {})))
+        # compare only entity sets that some Table 6-4 row of the submission's sets names: for an 8-K, US decides
+        # nothing (8K.A is ALL), while SPAC decides EX98.SPAC
+        relevant = {e for row in setDefinitions.get("instanceTypes", ()) if row["submissionSet"] in submissionSets
+                    for e in [row["includedEntitySet"]] + list(row.get("excludedEntitySets", ())) if e != "ALL"}
+        onlyParam, onlyDetermined = (given - set(determined)) & relevant, (set(determined) - given) & relevant
         result["entitySetsDisagreement"] = (sorted(onlyParam), sorted(onlyDetermined)) if onlyParam or onlyDetermined else None
     else:
         result["entitySets"] = determined
@@ -296,5 +308,5 @@ def resolveInstanceTypes(exgSets, submissionType, documentType=None, attachmentD
         result["unknownEntitySets"] = []
         result["entitySetsDisagreement"] = None
     result["submissionInstanceTypes"], result["instanceTypes"] = instanceTypesOf(
-        exgSets, submissionSets, set(result["entitySets"]), attachmentDocumentType, documentType)
+        setDefinitions, submissionSets, set(result["entitySets"]), attachmentDocumentType, documentType)
     return result

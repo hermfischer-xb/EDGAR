@@ -49,6 +49,11 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
                                     # and filingDate for each filing from its feed item (explicit parameters take precedence)
    "logRequiredContext": true/false, # log one info message per filing (code EDGAR.requiredContext) naming the required
                                      # context chosen and the step of the required context ordering that decided it
+   "entitySets": ["US", "SPAC"], # EDGAR XBRL Guide (EXG) entity sets (Table 6-3 codes) of the registrant, from the
+                                 # registration database; a list in JSON, or one blank-separated string from formula or
+                                 # GUI parameters.  When absent they are determined from the submission (InstanceTypes.py)
+   "logInstanceTypes": true/false, # log one info message per instance (code EDGAR.instanceTypes) naming its EXG instance
+                                   # types (Table 6-4), submission sets and entity sets, and how each was decided
    "requiredContextShadow": "cover" or absent, # log one info message per filing (code EDGAR.requiredContextShadow)
                                      # comparing a cover-anchored selection (Filing.selectCoverAnchoredContext) with
                                      # the required context; batch analysis only, validation is unaffected
@@ -258,7 +263,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                 if isinstance(v, str):
                     if paramName in boolParameterNames:
                         v = {"true":True, "false":False}.get(v, v)
-                    elif paramName in {"itemsList", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds", "rptSeriesClassInfo.classIds", "newClass2.classIds"}:
+                    elif paramName in {"itemsList", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds", "rptSeriesClassInfo.classIds", "newClass2.classIds", "entitySets"}:
                         v = v.split()
                     elif paramName == "feeRate":
                         if isinstance(v, float):
