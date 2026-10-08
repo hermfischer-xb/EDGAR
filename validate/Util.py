@@ -322,15 +322,16 @@ def loadDeprecatedConceptDates(val, deprecatedConceptDates):
                 for localName, date in _deprecatedConceptDates.items():
                     deprecatedConceptDates[qname(ns, localName)] = date
 
-_exgSetsCache = {}
-def loadExgSets(modelXbrl):
-    """EXG Tables 6-1 to 6-4 (resources/exg-sets.json, generated from the guide; see InstanceTypes.py), loaded once."""
-    path = resourcesFilePath(modelXbrl.modelManager, "exg-sets.json")
-    if path not in _exgSetsCache:
+_setDefinitionsCache = {}
+def loadSetDefinitions(modelXbrl):
+    """EXG 1.1 Set Definitions, Tables 6-1 to 6-4 (resources/exg-set-definitions.json, generated from the guide; see
+    InstanceTypes.py), loaded once."""
+    path = resourcesFilePath(modelXbrl.modelManager, "exg-set-definitions.json")
+    if path not in _setDefinitionsCache:
         _file = openFileStream(modelXbrl.modelManager.cntlr, path, 'rt', encoding='utf-8')
-        _exgSetsCache[path] = json.load(_file)
+        _setDefinitionsCache[path] = json.load(_file)
         _file.close()
-    return _exgSetsCache[path]
+    return _setDefinitionsCache[path]
 _efmExgReferencesCache = {}
 def loadEfmExgReferences(modelXbrl):
     """EXG references for legacy checks with only an EFM reference (resources/efm-exg-references.json, generated; see
