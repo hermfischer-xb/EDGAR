@@ -8,14 +8,17 @@ loading a filing.
 An entry may carry an EDGAR Filer Manual section ("efm": "6.5.20"), another guide's section ("msgSection":
 "EXG:3.1.5", for the EDGAR XBRL Guide), or both.  Every reference the entry has becomes a message argument
 (efmSection, exgSection), so converting a validation to EXG adds the EXG reference rather than replacing the
-EFM one.  Which reference forms the message code, and with it the edgarCode and the numeric ID, is decided by
-messageCodeLeadingGuide for all entries alike: while it is "EFM", an entry with an EFM reference keeps the
-code it has always had, and only an entry with no EFM reference takes its code from the other guide.  When EFM
-is retired, setting it to "EXG" moves every entry with an EXG reference to its EXG code without editing entries.
+EFM one.  Which reference forms the message code, and with it the edgarCode and the numeric ID, is decided for all entries
+alike by the messageCodes parameter, the guides in priority order (parseMessageCodes), default "EFM": with
+"EFM", an entry with an EFM reference keeps the code it has always had, and only an entry with no EFM reference
+takes its code from the other guide; with "EXG", every entry with an EXG reference takes its EXG code, without
+editing entries.  Listing more than one guide, such as "EXG EFM", also gives each message its full code under
+each listed guide it has a reference to, as arguments efmCode and exgCode (messageGuideCodes), so that runs coded
+by different guides can be compared message by message.
 """
 import regex as re
 
-messageCodeLeadingGuide = "EFM" # the guide whose reference forms the message code when an entry has more than one
+messageCodeLeadingGuide = "EFM" # the guide whose reference forms the message code when messageCodes is not given
 
 # the part of a message key before its code suffix, e.g. "dq-{efmSection}" in "dq-{efmSection}-{tag}-Value"
 messageKeySectionPattern = re.compile(r"(.*[{]efmSection[}]|[a-z]{2}-[0-9]{4}|dq-)(.*)")
@@ -26,31 +29,55 @@ def sectionCodeParts(section):
     return [level.zfill(2) if i > 0 and level.isnumeric() else level
             for i, level in enumerate(section.split("."))]
 
+def parseMessageCodes(value):
+    """The messageCodes parameter: guides in priority order, e.g. ("EXG", "EFM"), from a list (JSON) or one
+    blank-separated string (formula or GUI parameter); (messageCodeLeadingGuide,) when absent or empty."""
+    if isinstance(value, str):
+        value = value.split()
+    guides = tuple(str(v).strip().upper() for v in (value or ()) if str(v).strip())
+    return guides or (messageCodeLeadingGuide,)
+
+def messageCodePrefixes(efm, msgSection):
+    """{guide: code prefix} for an entry's references, e.g. {"EFM": "EFM.6.05.20", "EXG": "EXG.3.01.05"}."""
+    codes = {}
+    if efm:
+        codes["EFM"] = ".".join(["EFM"] + sectionCodeParts(efm))
+    if msgSection:
+        guide, _sep, number = msgSection.partition(":")
+        codes[guide] = ".".join([guide] + sectionCodeParts(number))
+    return codes
+
 def messageSectionArgs(efm, msgSection, leadingGuide=messageCodeLeadingGuide):
     """Message arguments for an entry's references.
 
     efm: the EFM section, e.g. "6.5.20" or "ft.oClmSrc", or None
     msgSection: another guide's section as "prefix:section", e.g. "EXG:3.1.5", or None
+    leadingGuide: a guide, or guides in priority order as from parseMessageCodes
     Returns efmSection ("60520") and <prefix>Section ("exgSection": "30105") for each reference present, and
-    arelleCode, the code prefix ("EFM.6.05.20", "EXG.3.01.05"), from the leading guide's reference when the entry
-    has one, otherwise from EFM, otherwise from the other guide.  Returns no arelleCode when there is no reference.
+    arelleCode, the code prefix ("EFM.6.05.20", "EXG.3.01.05"), from the first leading guide the entry has a
+    reference to, otherwise from EFM, otherwise from the other guide.  Returns no arelleCode when there is no
+    reference.
     """
     args = {}
-    codes = {}
-    if efm:
-        levels = sectionCodeParts(efm)
-        args["efmSection"] = "".join(levels)
-        codes["EFM"] = ".".join(["EFM"] + levels)
-    if msgSection:
-        guide, _sep, number = msgSection.partition(":")
-        levels = sectionCodeParts(number)
-        args[f"{guide.lower()}Section"] = "".join(levels)
-        codes[guide] = ".".join([guide] + levels)
-    for guide in (leadingGuide, "EFM", *codes):
+    codes = messageCodePrefixes(efm, msgSection)
+    for guide, prefix in codes.items():
+        args[f"{guide.lower()}Section"] = prefix.partition(".")[2].replace(".", "")
+    leading = (leadingGuide,) if isinstance(leadingGuide, str) else tuple(leadingGuide)
+    for guide in (*leading, "EFM", *codes):
         if guide in codes:
             args["arelleCode"] = codes[guide]
             break
     return args
+
+def messageGuideCodes(messageKey, logArgs, efm, msgSection, guides):
+    """When more than one guide is listed (messageCodes "EXG EFM"), the message's full code under each listed guide
+    the entry has a reference to, as arguments efmCode and exgCode; otherwise none.  Raises KeyError as
+    messageCode does."""
+    if len(guides) < 2:
+        return {}
+    codes = messageCodePrefixes(efm, msgSection)
+    return {f"{guide.lower()}Code": messageCode(messageKey, dict(logArgs, arelleCode=codes[guide]))
+            for guide in guides if guide in codes}
 
 def messageEdgarCode(messageKey, arelleCode):
     """The edgarCode argument: the message key with its {...} fields un-expanded.  When the code comes from a

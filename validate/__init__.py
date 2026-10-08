@@ -40,6 +40,11 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "rptSeriesClassInfo.classIds": ["C000000123", ...] # list of EDGAR classId values
    "newClass2.classIds": [] # //classId xpath result on submission headers
    "saveCoverFacts": test environment file into which to save JSON output
+    "messageCodes": ["EXG", "EFM"], # guides whose references form message codes, in priority order; default "EFM".
+                                    # "EXG" codes a message by its EDGAR XBRL Guide reference where it has one; "EFM"
+                                    # requests the legacy EDGAR Filer Manual codes.  Listing both also gives each message
+                                    # efmCode and exgCode arguments, for comparing runs coded differently.  A list in
+                                    # JSON, or one blank-separated string from formula or GUI parameters ("EXG EFM")
    # CEF forms
    "eligibleFundFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
    "pursuantGeneralInstructionFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
@@ -196,7 +201,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                       "rptIncludeAllSeriesFlag", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds",
                       "rptIncludeAllClassesFlag", "rptSeriesClassInfo.classIds", "newClass2.classIds",
                       "eligibleFundFlag", "pursuantGeneralInstructionFlag", "filerNewRegistrantFlag",
-                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts",
+                      "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "messageCodes",
                       "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
     boolParameterNames = {"voluntaryFilerFlag", "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus",
                           "smallBusinessFlag", "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "rptIncludeAllSeriesFlag",
@@ -241,7 +246,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                 if isinstance(v, str):
                     if paramName in boolParameterNames:
                         v = {"true":True, "false":False}.get(v, v)
-                    elif paramName in {"itemsList", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds", "rptSeriesClassInfo.classIds", "newClass2.classIds"}:
+                    elif paramName in {"itemsList", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds", "rptSeriesClassInfo.classIds", "newClass2.classIds", "messageCodes"}:
                         v = v.split()
                     elif paramName == "feeRate":
                         if isinstance(v, float):
@@ -365,6 +370,10 @@ def severityReleveler(modelXbrl, level, messageCode, args, **kwargs):
                 args["severity"] = "warning"
         # add message number
         messageCode, msgNum = messageNumericId(modelXbrl, level, messageCode, args)
+        # messageNumericId rewrites fee-tagging codes (EFM.ft.dbtVal4 -> EFM.FT.2.3.1.dbtVal4); an efmCode argument
+        # (messageCodes listing more than one guide) takes the same rewrite, so it equals the code an EFM-coded run logs
+        if isinstance(args.get("efmCode"), str) and args["efmCode"].startswith("EFM.ft."):
+            args["efmCode"] = messageNumericId(modelXbrl, level, args["efmCode"], args)[0]
         if msgNum:
             args["edgarMessageNumericId"] = msgNum
         if getattr(modelXbrl, "loadedFromFtJson", False) and level == "ERROR":
