@@ -52,6 +52,11 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "entitySets": ["US", "SPAC"], # EDGAR XBRL Guide (EXG) entity sets (Table 6-3 codes) of the registrant, from the
                                  # registration database; a list in JSON, or one blank-separated string from formula or
                                  # GUI parameters.  When absent they are determined from the submission (InstanceTypes.py)
+   "messageCodes": ["EXG", "EFM"], # guides whose references form message codes, in priority order; default "EFM".
+                                   # "EXG" codes a message by its EDGAR XBRL Guide reference where it has one; "EFM"
+                                   # requests the legacy EDGAR Filer Manual codes.  Listing both also gives each message
+                                   # efmCode and exgCode arguments, for comparing runs coded differently.  A list in
+                                   # JSON, or one blank-separated string from formula or GUI parameters ("EXG EFM")
    "logInstanceTypes": true/false, # log one info message per instance (code EDGAR.instanceTypes) naming its EXG instance
                                    # types (Table 6-4), submission sets and entity sets, and how each was decided
    "requiredContextShadow": "cover" or absent, # log one info message per filing (code EDGAR.requiredContextShadow)
@@ -218,7 +223,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                       "rptIncludeAllClassesFlag", "rptSeriesClassInfo.classIds", "newClass2.classIds",
                       "eligibleFundFlag", "pursuantGeneralInstructionFlag", "filerNewRegistrantFlag",
                       "datetimeForTesting", "dqcRuleFilter", "saveCoverFacts", "rssItemParameters", "logRequiredContext",
-                      "requiredContextShadow", "entitySets", "logInstanceTypes", "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
+                      "requiredContextShadow", "entitySets", "logInstanceTypes", "messageCodes", "feeRate", "feeValuesFromFacts", "saveFeeFacts", "fiscalYearEnd", "intrstRate", "issrNm", "fileNumber", "closedEndedCompanyFlag"}
     boolParameterNames = {"voluntaryFilerFlag", "wellKnownSeasonedIssuerFlag", "shellCompanyFlag", "acceleratedFilerStatus",
                           "smallBusinessFlag", "emergingGrowthCompanyFlag", "exTransitionPeriodFlag", "rptIncludeAllSeriesFlag",
                           "filerNewRegistrantFlag", "pursuantGeneralInstructionFlag", "eligibleFundFlag", "closedEndedCompanyFlag",
@@ -263,7 +268,7 @@ def validateXbrlStart(val, parameters=None, *args, **kwargs):
                 if isinstance(v, str):
                     if paramName in boolParameterNames:
                         v = {"true":True, "false":False}.get(v, v)
-                    elif paramName in {"itemsList", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds", "rptSeriesClassInfo.classIds", "newClass2.classIds", "entitySets"}:
+                    elif paramName in {"itemsList", "rptSeriesClassInfo.seriesIds", "newClass2.seriesIds", "rptSeriesClassInfo.classIds", "newClass2.classIds", "entitySets", "messageCodes"}:
                         v = v.split()
                     elif paramName == "feeRate":
                         if isinstance(v, float):
@@ -403,6 +408,10 @@ def severityReleveler(modelXbrl, level, messageCode, args, **kwargs):
                 args["severity"] = "warning"
         # add message number
         messageCode, msgNum = messageNumericId(modelXbrl, level, messageCode, args)
+        # messageNumericId rewrites fee-tagging codes (EFM.ft.dbtVal4 -> EFM.FT.2.3.1.dbtVal4); an efmCode argument
+        # (messageCodes listing more than one guide) takes the same rewrite, so it equals the code an EFM-coded run logs
+        if isinstance(args.get("efmCode"), str) and args["efmCode"].startswith("EFM.ft."):
+            args["efmCode"] = messageNumericId(modelXbrl, level, args["efmCode"], args)[0]
         if msgNum:
             args["edgarMessageNumericId"] = msgNum
         if getattr(modelXbrl, "loadedFromFtJson", False) and level == "ERROR":
