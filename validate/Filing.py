@@ -42,7 +42,7 @@ from .Consts import submissionTypesAllowingSeriesClasses, \
                     nsPatternNotAllowedinxBRLXML, subTypesWarningforxBRLXml
 
 from .Dimensions import checkFilingDimensions
-from .MessageReferences import messageSectionArgs, messageEdgarCode, messageCode
+from .MessageReferences import messageSectionArgs, messageEdgarCode, messageCode, parseMessageCodes, messageGuideCodes
 from .PreCalAlignment import checkCalcsTreeWalk
 from .RequiredContext import edgarDateParamValue, requiredContextEligibleContexts, businessDayOffset, \
                                documentPeriodEndDateRequired, \
@@ -162,6 +162,8 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     val.requiredContext = None
     val.requiredInstantContext = None # step 9 was dropped by the EXG author 2026-09-18; None for any reader that remains
     deiDocumentType = None # needed for non-instance validation too
+    # guides whose references form message codes, in priority order (messageCodes parameter; see MessageReferences)
+    messageCodeGuides = parseMessageCodes(val.params.get("messageCodes"))
     # efmSubmissionType and efmIxdsType are already set when re-validating after redaction/redline removal
     submissionType = getattr(modelXbrl,'efmSubmissionType', val.params.get("submissionType", ""))
     attachmentDocumentType = getattr(modelXbrl,'efmIxdsType', val.params.get("attachmentDocumentType", "")) # this is different from dei:documentType
@@ -1288,10 +1290,12 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                         if isinstance(v, list):
                             logArgs[n] = "".join(v)
                 # the entry's EFM and other-guide (msgSection) references, as arguments and as the code (see MessageReferences)
-                logArgs.update(messageSectionArgs(logArgs.get("efmSection", sev.get("efm")), sev.get("msgSection")))
+                _efm, _msgSection = logArgs.get("efmSection", sev.get("efm")), sev.get("msgSection")
+                logArgs.update(messageSectionArgs(_efm, _msgSection, messageCodeGuides))
                 logArgs["edgarCode"] = messageEdgarCode(messageKey, logArgs.get("arelleCode")) # edgar code is the un-expanded key for message with {...}'s
                 try:
                     arelleCode = messageCode(messageKey, logArgs)
+                    logArgs.update(messageGuideCodes(messageKey, logArgs, _efm, _msgSection, messageCodeGuides))
                 except KeyError as err:
                     modelXbrl.error("arelle:loadDeiValidations",
                                     _("Missing field %(field)s from messageKey %(messageKey)s, validation %(validation)s."),
