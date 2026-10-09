@@ -33,7 +33,7 @@ exhibit's instance is told apart from the primary document's.
 
 This module has no Arelle imports, so that it can be tested on its own.
 """
-import json, re
+import collections, json, re
 
 # Table 6-2 '%' suffixes say an exhibit is in the submission; the guide states them in prose ("There is an Exhibit
 # 2.01 in the submission"), so they are mapped to EDGAR document types here.  A suffix in the data that is not here
@@ -284,6 +284,7 @@ def resolveInstanceTypes(setDefinitions, submissionType, documentType=None, atta
       instanceTypes             this instance's instance types
       submissionInstanceTypes   every instance type the submission's matching rows yield
       unresolved                notes on suffixes the data uses that cannot be evaluated
+      scopeSubmissionSets       the submission sets this instance is in for a scope cell's "s:" (scopeSubmissionSetsOf)
     """
     submissionSets, unresolved = submissionSetsOf(setDefinitions, submissionType, documentType, attachmentDocumentType,
                                                   invCompanyType)
@@ -309,4 +310,93 @@ def resolveInstanceTypes(setDefinitions, submissionType, documentType=None, atta
         result["entitySetsDisagreement"] = None
     result["submissionInstanceTypes"], result["instanceTypes"] = instanceTypesOf(
         setDefinitions, submissionSets, set(result["entitySets"]), attachmentDocumentType, documentType)
+    result["scopeSubmissionSets"] = scopeSubmissionSetsOf(setDefinitions, submissionSets, result["instanceTypes"],
+                                                          attachmentDocumentType, documentType)
     return result
+
+
+# Scope cells.  EXG section 3 scopes each rule by its Incl and Excl cells: "s: AF, QF, i: AF.US, AF.BDC" names
+# submission sets after "s:" and instance types after "i:".  A rule applies to an instance when its Incl cell
+# matches and its Excl cell does not.  The readings below are OURS, to confirm with the EXG author; the crosswalk
+# (EDGAR-handoffs, streams/exg-conversion/crosswalk) uses these same functions:
+#   - an instance that is itself an exhibit named by a Table 6-4 row (the fee exhibit, EX-98, EX-2.01, ...) is in a
+#     submission set for "s:" only where that set holds nothing but exhibits (FE, SE, TO): an 8-K's Exhibit 98 is
+#     EX98.SPAC, not "s: 8K";
+#   - such an exhibit-only set does not hold the submission's other instances, so an S-1's primary document is not
+#     "in FE" although Table 6-1 lists S-1 under FE (otherwise 3.1.5's "Excl s: FE" excludes every S-1);
+#   - ALL, under "s:" or "i:", is every instance that is in a submission set or has an instance type.
+
+def exhibitOnlySubmissionSets(setDefinitions):
+    """Submission sets whose Table 6-4 rows all name an exhibit (FE, SE, TO)."""
+    rows = collections.defaultdict(list)
+    for row in setDefinitions.get("instanceTypes", ()):
+        rows[row["submissionSet"]].append(row)
+    return {code for code, rs in rows.items() if rs and all(r.get("exhibitType") for r in rs)}
+
+
+def scopeSubmissionSetsOf(setDefinitions, submissionSets, instanceTypes, attachmentDocumentType=None, documentType=None):
+    """The submission sets an instance is in for a scope cell's "s:", from the submission's sets (submissionSetsOf)
+    and this instance's instance types (instanceTypesOf); see the readings above."""
+    exhibitOnly = exhibitOnlySubmissionSets(setDefinitions)
+    exhibitRows = [r for r in setDefinitions.get("instanceTypes", ())
+                   if r["submissionSet"] in submissionSets and r.get("exhibitType") and r["instanceType"] in instanceTypes
+                   and exhibitIn(r["exhibitType"], attachmentDocumentType, documentType)]
+    if exhibitRows:
+        return {r["submissionSet"] for r in exhibitRows} & exhibitOnly
+    return set(submissionSets) - exhibitOnly
+
+
+def parseScopeCell(setDefinitions, text):
+    """An Incl or Excl cell: {"s": submission sets, "i": instance types, "all": bool, "issues": [...]}.
+
+    Each code counts by what it is, whatever prefix it is written under, and is reported in issues when the prefix
+    is wrong or missing; codes run together without a comma, and "All" for ALL, are read as meant and reported.
+    Codes that Table 6-1 and 6-4 do not define are reported and ignored."""
+    instanceTypes = {r["instanceType"] for r in setDefinitions.get("instanceTypes", ())}
+    submissionSets = set(setDefinitions.get("submissionSets", {}))
+    out = {"s": set(), "i": set(), "all": False, "issues": []}
+    prefix = None
+    for raw in re.split(r",|\s+(?=[si]\s*:)", (text or "").replace("\xa0", " ").strip()):
+        tok = raw.strip()
+        m = re.match(r"([si])\s*:\s*(.*)$", tok)
+        if m:
+            prefix, tok = m.group(1), m.group(2).strip()
+        pieces = [x for x in re.split(r"\s+|(?<=[A-Z])\.\s+", tok) if x]
+        if len(pieces) > 1:
+            out["issues"].append("'{}' lacks a comma between codes".format(tok))
+        for code in pieces:
+            if code.upper() == "ALL":
+                out["all"] = True
+                if code != "ALL":
+                    out["issues"].append("'{}' written for ALL".format(code))
+                if prefix is None:
+                    out["issues"].append("ALL without s: or i:")
+            elif code in instanceTypes:
+                out["i"].add(code)
+                if prefix != "i":
+                    out["issues"].append("{} is an instance type, written {}".format(
+                        code, "under s:" if prefix else "without s: or i:"))
+            elif code in submissionSets:
+                out["s"].add(code)
+                if prefix != "s":
+                    out["issues"].append("{} is a submission set, written {}".format(
+                        code, "under i:" if prefix else "without s: or i:"))
+            else:
+                out["issues"].append("{} is neither a submission set nor an instance type".format(code))
+    return out
+
+
+def scopeMatches(cell, scopeSubmissionSets, instanceTypes):
+    """Whether a parsed scope cell names this instance."""
+    return ((cell["all"] and bool(scopeSubmissionSets or instanceTypes))
+            or bool(cell["s"] & set(scopeSubmissionSets)) or bool(cell["i"] & set(instanceTypes)))
+
+
+def scopeApplies(setDefinitions, incl, excl, scopeSubmissionSets, instanceTypes):
+    """Whether a rule scoped by EXG Incl and Excl cells (text, or parsed by parseScopeCell) applies to an instance,
+    given its scopeSubmissionSets and instanceTypes as resolveInstanceTypes returns them."""
+    if not isinstance(incl, dict):
+        incl = parseScopeCell(setDefinitions, incl)
+    if not isinstance(excl, dict):
+        excl = parseScopeCell(setDefinitions, excl)
+    return scopeMatches(incl, scopeSubmissionSets, instanceTypes) and not scopeMatches(excl, scopeSubmissionSets, instanceTypes)
