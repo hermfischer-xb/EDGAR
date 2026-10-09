@@ -89,9 +89,20 @@ def formsInside(documentType=None, invCompanyType=None):
     return {f for f in (FORM_OF_DOCUMENT_TYPE.get(documentType, documentType), (invCompanyType or "").strip()) if f}
 
 
+# document types the plugin uses as a submission type when none is supplied (the desktop preview of an exhibit):
+# Filing.py infers the submission type from dei:DocumentType, and Consts.docTypesSubType maps only 2.01 SD
+DOCUMENT_TYPE_SUBMISSION_TYPES = {
+    "2.01 SD": "SD",
+    "K SDR": "SDR",
+    "L SDR": "SDR",
+}
+
+
 def baseSubmissionType(submissionType):
-    """The EDGAR submission type without the plugin's '§' suffix ("S-4EF§EX-98" -> "S-4EF")."""
-    return (submissionType or "").partition("§")[0]
+    """The EDGAR submission type without the plugin's '§' suffix ("S-4EF§EX-98" -> "S-4EF"), and with a document
+    type standing in for a submission type replaced by that submission type ("K SDR" -> "SDR")."""
+    submissionType = (submissionType or "").partition("§")[0]
+    return DOCUMENT_TYPE_SUBMISSION_TYPES.get(submissionType, submissionType)
 
 
 def submissionSetsOf(setDefinitions, submissionType, documentType=None, attachmentDocumentType=None, invCompanyType=None):
