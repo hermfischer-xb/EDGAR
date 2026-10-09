@@ -322,6 +322,16 @@ def loadDeprecatedConceptDates(val, deprecatedConceptDates):
                 for localName, date in _deprecatedConceptDates.items():
                     deprecatedConceptDates[qname(ns, localName)] = date
 
+_requiredContextRulingsCache = {}
+def loadRequiredContextRulings(modelXbrl):
+    """The EXG author's rulings on the required context that are data (resources/required-context.json), loaded once."""
+    path = resourcesFilePath(modelXbrl.modelManager, "required-context.json")
+    if path not in _requiredContextRulingsCache:
+        _file = openFileStream(modelXbrl.modelManager.cntlr, path, 'rt', encoding='utf-8')
+        _requiredContextRulingsCache[path] = json.load(_file)
+        _file.close()
+    return _requiredContextRulingsCache[path]
+
 _setDefinitionsCache = {}
 def loadSetDefinitions(modelXbrl):
     """EXG 1.1 Set Definitions, Tables 6-1 to 6-4 (resources/exg-set-definitions.json, generated from the guide; see

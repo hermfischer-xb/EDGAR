@@ -7,7 +7,6 @@ values rather than the validation state, so that they can be tested without load
 """
 import datetime
 from arelle import XmlUtil
-from .Consts import exgRequiredContextDurationSubmissionTypes
 
 
 def edgarDateParamValue(dateParam):
@@ -162,7 +161,7 @@ def documentPeriodEndDateRequired(sevs, localName, submissionType, deiDocumentTy
     return not (optional and not required)
 
 
-def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts, filingDate=None,
+def selectRequiredContext(eligibleContexts, durationWindow, documentPeriodEndDateContexts, filingDate=None,
                           documentPeriodEndDateRequired=True):
     """Select the required context by the ordering of contexts that defines it for EDGAR.
 
@@ -216,7 +215,9 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
     against constructed context objects instead of by loading a filing:
       eligibleContexts               contexts remaining after steps 1 and 2 (requiredContextEligibleContexts),
                                      in order of appearance
-      submissionType                 submission type, with any "\u00a7" form suffix, for step 4
+      durationWindow                 whether step 4 applies: the submission is in one of the EXG submission sets
+                                     the EXG author named for it (resources/required-context.json), decided by
+                                     the caller from the submission's sets (InstanceTypes, EXG Table 6-1)
       documentPeriodEndDateContexts  contexts holding a dei:DocumentPeriodEndDate fact, for step 4b
       filingDate                     the submission's filing date as a datetime.date, or None; contexts
                                      ending more than one business day after it are excluded
@@ -245,7 +246,7 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
         return (cntx.endDatetime - cntx.startDatetime).days
     chosen = step = None
     # step 4
-    if submissionType and submissionType.partition("\u00a7")[0].strip() in exgRequiredContextDurationSubmissionTypes:
+    if durationWindow:
         window = [c for c in durations if 28 <= days(c) <= 371]  # 4a
         if window:
             withDocumentPeriodEndDate = [c for c in window if c in documentPeriodEndDateContexts]
@@ -284,7 +285,7 @@ def selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDat
 FEE_EXHIBIT_ANCHORS = ("FeeExhibitTp", "EntityCentralIndexKey", "EntityRegistrantName")
 
 
-def selectFeeExhibitRequiredContext(eligibleContexts, anchorContexts, submissionType,
+def selectFeeExhibitRequiredContext(eligibleContexts, anchorContexts, durationWindow,
                                     documentPeriodEndDateContexts, filingDate=None):
     """Select a fee exhibit's required context by its anchor facts, falling back to the ordering.
 
@@ -300,7 +301,7 @@ def selectFeeExhibitRequiredContext(eligibleContexts, anchorContexts, submission
       eligibleContexts               contexts remaining after steps 1 and 2, in order of appearance
       anchorContexts                 sequence of (anchor local name, set of contexts holding that fact), in
                                      FEE_EXHIBIT_ANCHORS order
-      submissionType, documentPeriodEndDateContexts, filingDate
+      durationWindow, documentPeriodEndDateContexts, filingDate
                                      as for selectRequiredContext
 
     Returns (requiredContext, step): step is "FE:" and the deciding anchor's local name, followed by "/" and
@@ -313,9 +314,9 @@ def selectFeeExhibitRequiredContext(eligibleContexts, anchorContexts, submission
         if len(anchored) == 1:
             return anchored[0], "FE:" + anchorName
         if anchored:
-            chosen, step = selectRequiredContext(anchored, submissionType, documentPeriodEndDateContexts, None)
+            chosen, step = selectRequiredContext(anchored, durationWindow, documentPeriodEndDateContexts, None)
             return chosen, "FE:{}/{}".format(anchorName, step)
-    return selectRequiredContext(eligibleContexts, submissionType, documentPeriodEndDateContexts, filingDate)
+    return selectRequiredContext(eligibleContexts, durationWindow, documentPeriodEndDateContexts, filingDate)
 
 
 def contextPeriodText(cntx):
