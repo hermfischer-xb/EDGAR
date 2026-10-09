@@ -49,7 +49,7 @@ from .RequiredContext import edgarDateParamValue, requiredContextEligibleContext
                                contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext, \
                                FEE_EXHIBIT_ANCHORS, selectFeeExhibitRequiredContext
 from .InstanceTypes import resolveInstanceTypes
-from .Util import loadSetDefinitions, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
+from .Util import loadSetDefinitions, loadRequiredContextRulings, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
                     loadUgtRelQnames, loadDqcRules, \
                     loadTaxonomyCompatibility, loadIxTransformRegistries, ValueRange
@@ -862,6 +862,9 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             _filingDate = datetime.date.fromisoformat(edgarDateParamValue(val.params.get("filingDate")) or "")
         except ValueError:
             _filingDate = None
+        # step 4 applies to submissions in the EXG submission sets the EXG author named (resources/required-context.json)
+        _durationWindow = bool(set(val.exgInstanceTypes["submissionSets"]) &
+                               set(loadRequiredContextRulings(modelXbrl)["durationSubmissionSets"]["sets"]))
         if isFeeTagging: # a fee exhibit's required context is the context of its anchor facts (FEE_EXHIBIT_ANCHORS)
             def _anchorContexts(localName):
                 return {f.context for f in modelXbrl.factsByLocalName.get(localName, ())
@@ -871,14 +874,14 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                  disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI))}
             val.requiredContext, requiredContextStep = selectFeeExhibitRequiredContext(
                 requiredContextEligible, [(name, _anchorContexts(name)) for name in FEE_EXHIBIT_ANCHORS],
-                submissionType, documentPeriodEndDateContexts, _filingDate)
+                _durationWindow, documentPeriodEndDateContexts, _filingDate)
         else:
             # step 4b applies only where the submission type requires dei:DocumentPeriodEndDate
             _documentPeriodEndDateRequired = (not isEFM or documentPeriodEndDateRequired(
                 deiValidations["sub-type-element-validations"], disclosureSystem.deiDocumentPeriodEndDateElement,
                 submissionType, deiDocumentType, attachmentDocumentType))
             val.requiredContext, requiredContextStep = selectRequiredContext(
-                requiredContextEligible, submissionType, documentPeriodEndDateContexts, _filingDate,
+                requiredContextEligible, _durationWindow, documentPeriodEndDateContexts, _filingDate,
                 _documentPeriodEndDateRequired)
         val.requiredInstantContext = None # step 9 dropped by the EXG author, 2026-09-18
         _periodOfReport = edgarDateParamValue(val.params.get("periodOfReport"))
