@@ -48,7 +48,7 @@ from .RequiredContext import edgarDateParamValue, requiredContextEligibleContext
                                documentPeriodEndDateRequired, \
                                contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext, \
                                FEE_EXHIBIT_ANCHORS, selectFeeExhibitRequiredContext
-from .InstanceTypes import resolveInstanceTypes
+from .InstanceTypes import resolveInstanceTypes, scopeApplies
 from .Util import loadSetDefinitions, loadRequiredContextRulings, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
                     loadUgtRelQnames, loadDqcRules, \
@@ -899,6 +899,10 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                           max(businessDayOffset(_filingDate, 1), _filingDate + datetime.timedelta(days=4)))
                          if _filingDate is not None else None)
         headerDates = [d for d in (_periodOfReport, edgarDateParamValue(val.params.get("filingDate"))) if d]
+        # the check's scope, as EXG Incl/Excl cells (resources/required-context.json; the guide's row says "i:ALL")
+        _headerCheck = loadRequiredContextRulings(modelXbrl)["headerCheck"]
+        _headerCheckInScope = scopeApplies(loadSetDefinitions(modelXbrl), _headerCheck["incl"], _headerCheck["excl"],
+                                           val.exgInstanceTypes["scopeSubmissionSets"], val.exgInstanceTypes["instanceTypes"])
         if requiredContextIneligibleStep or val.requiredContext is None:
             modelXbrl.error(("EFM.6.05.19", "GFM.1.02.18"),
                 _("A required context was not found for document type %(documentType)s: %(reason)s"),
@@ -908,7 +912,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                         "2a": _("every context has a custom axis.")
                         }.get(requiredContextIneligibleStep,
                               _("no duration context remains once contexts with a custom axis are excluded.")))
-        elif headerDates and not any(
+        elif headerDates and _headerCheckInScope and not any(
                 c.isStartEndPeriod and c.endDatetime is not None and
                 (XmlUtil.dateunionValue(c.endDatetime, subtractOneDay=True) == _periodOfReport or
                  (_filingWindow is not None and _filingWindow[0] <= contextLastDay(c) <= _filingWindow[1]))
@@ -932,7 +936,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             modelXbrl.info("EDGAR.requiredContext",
                 _("Required context %(contextID)s %(period)s chosen at step %(step)s (step 1 by %(step1)s, "
                   "%(standardDimensions)s standard dimensions), instant %(instantContextID)s, "
-                  "submission type %(submissionType)s, header dates %(headerDates)s, DocumentPeriodEndDate "
+                  "submission type %(submissionType)s, header dates %(headerDates)s (header check %(headerCheck)s), DocumentPeriodEndDate "
                   "contexts %(documentPeriodEndDateContexts)s; DocumentType in it: %(documentTypeIn)s, "
                   "DocumentType contexts: %(documentTypeContexts)s."),
                 modelObject=_rc if _rc is not None else modelXbrl,
@@ -947,6 +951,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                                                (_rc.endDatetime - _rc.startDatetime).days) if _rc is not None else "",
                 instantContextID=getattr(val.requiredInstantContext, "id", "(none)"),
                 submissionType=submissionType or "(none)", headerDates=", ".join(headerDates) or "(none)",
+                headerCheck="in scope" if _headerCheckInScope else "not in scope",
                 documentPeriodEndDateContexts=", ".join(sorted(c.id for c in documentPeriodEndDateContexts)) or "(none)",
                 documentTypeIn="yes" if any(f.context is _rc for f in _documentTypeFacts) and _rc is not None else "no",
                 documentTypeContexts=", ".join(sorted({f.contextID for f in _documentTypeFacts})) or "(none)")

@@ -1,7 +1,25 @@
 {
  "comment": "The EDGAR XBRL Guide (EXG) author's rulings on the required context that RequiredContext.py and Filing.py read as data, so that a further ruling is an edit here rather than in code. Submission set codes are EXG Table 6-1's (exg-set-definitions.json).",
  "durationSubmissionSets": {
-  "sets": ["6K", "8K", "AF", "EBP", "HF", "OA", "PX", "QF", "RF", "SE", "TF", "TO"],
+  "sets": [
+   "6K",
+   "8K",
+   "AF",
+   "EBP",
+   "HF",
+   "OA",
+   "PX",
+   "QF",
+   "RF",
+   "SE",
+   "TF",
+   "TO"
+  ],
   "ruling": "Step 4 of the ordering applies to submissions in these sets: EXG author 2026-09-14, QF added in his revision the same day."
+ },
+ "headerCheck": {
+  "incl": "i:ALL",
+  "excl": "",
+  "ruling": "EXG 3.1.2 row 2 (EFM 6.5.19 header check) applies where the guide's own Incl and Excl cells say, \"i:ALL\": every instance that has an EXG instance type. Herm, 2026-10-09: 26.4 ships the check as the guide writes it; the filer community assesses it during the preview."
  }
 }
