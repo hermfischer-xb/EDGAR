@@ -48,7 +48,8 @@ from .RequiredContext import edgarDateParamValue, requiredContextEligibleContext
                                documentPeriodEndDateRequired, \
                                contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext, \
                                FEE_EXHIBIT_ANCHORS, selectFeeExhibitRequiredContext
-from .Util import conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
+from .InstanceTypes import resolveInstanceTypes
+from .Util import loadSetDefinitions, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
                     loadUgtRelQnames, loadDqcRules, \
                     loadTaxonomyCompatibility, loadIxTransformRegistries, ValueRange
@@ -802,6 +803,46 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
             del probStartEndCntxsByEnd, startEndCntxsByEnd, probInstantCntxsByEnd
             del durationCntxStartDatetimes
             val.modelXbrl.profileActivity("... filer instant-duration checks", minTimeToShow=1.0)
+
+        # EXG instance types (EXG 1.1, Tables 6-1 to 6-4; see InstanceTypes.py): entity sets come from the entitySets
+        # parameter when the caller supplies them, otherwise they are determined from the submission
+        def _deiFactValues(localName):
+            return [str(f.xValue).strip() for f in modelXbrl.factsByLocalName.get(localName, ())
+                    if not f.isNil and f.xValue is not None and disclosureSystem.deiNamespacePattern is not None and
+                       disclosureSystem.deiNamespacePattern.match(f.qname.namespaceURI)]
+        val.exgInstanceTypes = resolveInstanceTypes(
+            loadSetDefinitions(modelXbrl), submissionType, deiDocumentType, attachmentDocumentType,
+            entitySetsParameter=val.params.get("entitySets"),
+            # the feed item's file number reaches only the resolver: as the fileNumber parameter it would also
+            # change the fee-tagging checks that read header:fileNumber
+            fileNumbers=[n for n in (val.params.get("fileNumber"),
+                                     getattr(getattr(modelXbrl, "efmRssItem", None), "fileNumber", None)
+                                     if val.params.get("rssItemParameters") is True else None) if n] +
+                        _deiFactValues("EntityFileNumber"),
+            invCompanyType=val.params.get("invCompanyType") or deiItems.get("EntityInvCompanyType"),
+            taxonomyPrefixes={ns.split("/")[3] for ns in {f.qname.namespaceURI for f in modelXbrl.factsInInstance}
+                              if ns and ns.startswith("http://xbrl.sec.gov/")})
+        if val.params.get("logInstanceTypes") is True: # one record per instance, for batch analysis
+            _it = val.exgInstanceTypes
+            modelXbrl.info("EDGAR.instanceTypes",
+                _("Instance types %(instanceTypes)s (submission: %(submissionInstanceTypes)s); submission sets "
+                  "%(submissionSets)s; entity sets %(entitySets)s, %(entitySetsSource)s%(disagreement)s%(unresolved)s; "
+                  "submission type %(submissionType)s (%(submissionTypeSource)s), DocumentType %(documentType)s, "
+                  "attachment document type %(attachmentDocumentType)s (%(attachmentDocumentTypeSource)s)."),
+                modelObject=modelXbrl,
+                instanceTypes=", ".join(_it["instanceTypes"]) or "(none)",
+                submissionInstanceTypes=", ".join(_it["submissionInstanceTypes"]) or "(none)",
+                submissionSets=", ".join("{} ({})".format(k, v) for k, v in sorted(_it["submissionSets"].items())) or "(none)",
+                entitySets=", ".join("{} ({})".format(k, v) for k, v in sorted(_it["entitySets"].items())),
+                entitySetsSource=_it["entitySetsSource"],
+                disagreement=("; parameter only {}, determined only {}".format(*_it["entitySetsDisagreement"])
+                              if _it["entitySetsDisagreement"] else "") +
+                             ("; unknown entity sets {}".format(_it["unknownEntitySets"]) if _it["unknownEntitySets"] else ""),
+                unresolved="; unresolved: " + "; ".join(_it["unresolved"]) if _it["unresolved"] else "",
+                submissionType=submissionType, documentType=deiDocumentType, attachmentDocumentType=attachmentDocumentType,
+                # supplied by the caller (EDGAR, a filer, an RSS feed item), else inferred above from the instance
+                submissionTypeSource="supplied" if val.params.get("submissionType") else "inferred",
+                attachmentDocumentTypeSource="supplied" if val.params.get("attachmentDocumentType") else "inferred")
 
         #6.5.19 required context, by the EDGAR required context ordering (see selectRequiredContext)
         headerCiks = set(val.params.get("cikNameList") or ())

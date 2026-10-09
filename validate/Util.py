@@ -322,6 +322,17 @@ def loadDeprecatedConceptDates(val, deprecatedConceptDates):
                 for localName, date in _deprecatedConceptDates.items():
                     deprecatedConceptDates[qname(ns, localName)] = date
 
+_setDefinitionsCache = {}
+def loadSetDefinitions(modelXbrl):
+    """EXG 1.1 Set Definitions, Tables 6-1 to 6-4 (resources/exg-set-definitions.json, generated from the guide; see
+    InstanceTypes.py), loaded once."""
+    path = resourcesFilePath(modelXbrl.modelManager, "exg-set-definitions.json")
+    if path not in _setDefinitionsCache:
+        _file = openFileStream(modelXbrl.modelManager.cntlr, path, 'rt', encoding='utf-8')
+        _setDefinitionsCache[path] = json.load(_file)
+        _file.close()
+    return _setDefinitionsCache[path]
+
 def resourcesFilePath(modelManager, *paths):
     # resourcesDir can be in cache dir (production) or in validate/EFM/resources (for development)
     _resourcesDir = os.path.join( os.path.dirname(__file__), "resources") # dev/testing location
