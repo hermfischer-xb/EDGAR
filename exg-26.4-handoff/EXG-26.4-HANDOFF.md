@@ -84,12 +84,20 @@ the developer; do not guess.
    status and message codes to the fork's integration branch on all 8,582 variations; the DQC removal does too.
    - Pull 2 in its default mode (`messageCodes` absent, so `EFM`) changes no code.
    - Any difference after rebasing comes from the interaction with SEC's changes and should be looked at.
-3. **Unit tests**, in this handoff branch's `exg-26.4-handoff/tests/` folder. They have no Arelle imports except where noted, and
-   each takes the plugin path as its argument:
+3. **Unit tests**, in this handoff branch's `exg-26.4-handoff/tests/` folder. They have no Arelle imports except where noted. Each takes the plugin directory
+   as its argument, except where noted. All pass on both pulls:
 
    ```
-   python3 exg-26.4-handoff/tests/test_instance_types.py <plugin dir>        # Pull 1 and Pull 2
-   python3 exg-26.4-handoff/tests/test_message_references.py <plugin dir>    # Pull 2 (needs Arelle's Python, for regex)
+   # Pull 1 and Pull 2: the required context and instance types
+   python3 exg-26.4-handoff/tests/test_select_required_context.py <plugin dir>     # the ordering, steps 1 to 8
+   python3 exg-26.4-handoff/tests/test_fee_exhibit_anchor.py <plugin dir>          # fee exhibits: the anchor facts
+   python3 exg-26.4-handoff/tests/test_step4_submission_sets.py <plugin dir>       # step 4's submission sets
+   python3 exg-26.4-handoff/tests/test_modeldocument_guard.py <plugin dir>         # an instance that did not load
+   python3 exg-26.4-handoff/tests/test_instance_types.py <plugin dir>              # Tables 6-1 to 6-4, scope cells
+   (cd <Arelle worktree root> && python3 <path>/exg-26.4-handoff/tests/test_document_period_end_date_required.py .)
+                                                                                    # step 4b; needs Arelle importable
+   # Pull 2: message references and codes
+   python3 exg-26.4-handoff/tests/test_message_references.py <plugin dir>          # needs Arelle's Python, for regex
    ```
 
    Whether these tests move into the plugin repository is the EDGAR team's decision.
