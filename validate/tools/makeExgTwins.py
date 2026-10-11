@@ -71,8 +71,12 @@ def insertTwinsAsText(text, twins):
     """The testcase file's own text with a twin of each listed variation inserted after it, so that a merge into the
     suite source shows only added lines.  twins: [(variation id, EXG code prefix)]."""
     for vid, prefix in twins:
-        m = re.search(r'(?P<indent>[ \t]*)(?P<block><(?P<p>\w+:)?variation\b[^>]*\bid="{}"[^>]*>.*?</(?P=p)?variation>)'
+        # the first such variation outside XML comments (a suite file may keep an old copy commented out)
+        comments = [c.span() for c in re.finditer(r"<!--.*?-->", text, re.S)]
+        m = next((c for c in re.finditer(
+                      r'(?P<indent>[ \t]*)(?P<block><(?P<p>\w+:)?variation\b[^>]*\bid="{}"[^>]*>.*?</(?P=p)?variation>)'
                       .format(re.escape(vid)), text, re.S)
+                  if not any(s <= c.start("block") < e for s, e in comments)), None)
         if not m:
             raise ValueError("variation {} not found as text".format(vid))
         block, pfx, indent = m.group("block"), m.group("p") or "", m.group("indent")
