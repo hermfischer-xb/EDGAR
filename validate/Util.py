@@ -11,6 +11,7 @@ from arelle import XbrlConst, UrlUtil
 from arelle.PythonUtil import attrdict, flattenSequence, pyObjectSize, OrderedSet
 from arelle.ValidateXbrlCalcs import inferredDecimals, floatINF
 from arelle.XmlValidateConst import VALID
+from .MessageReferences import referencesIndex
 from .Consts import standardNamespacesPattern, latestTaxonomyDocs, latestEntireUgt, attachmentDocumentTypeValidationRulesFiles, feeTaggingAttachmentDocumentTypePattern
 
 EMPTY_DICT = {}
@@ -332,6 +333,7 @@ def loadRequiredContextRulings(modelXbrl):
     return _requiredContextRulingsCache[path]
 
 _setDefinitionsCache = {}
+_efmExgReferencesCache = {}
 def loadSetDefinitions(modelXbrl):
     """EXG 1.1 Set Definitions, Tables 6-1 to 6-4 (resources/exg-set-definitions.json, generated from the guide; see
     InstanceTypes.py), loaded once."""
@@ -341,6 +343,16 @@ def loadSetDefinitions(modelXbrl):
         _setDefinitionsCache[path] = json.load(_file)
         _file.close()
     return _setDefinitionsCache[path]
+
+def loadEfmExgReferences(modelXbrl):
+    """EXG references for legacy checks with only an EFM reference (resources/efm-exg-references.json, generated; see
+    MessageReferences.inferredMsgSection), indexed and loaded once."""
+    path = resourcesFilePath(modelXbrl.modelManager, "efm-exg-references.json")
+    if path not in _efmExgReferencesCache:
+        _file = openFileStream(modelXbrl.modelManager.cntlr, path, 'rt', encoding='utf-8')
+        _efmExgReferencesCache[path] = referencesIndex(json.load(_file))
+        _file.close()
+    return _efmExgReferencesCache[path]
 
 def resourcesFilePath(modelManager, *paths):
     # resourcesDir can be in cache dir (production) or in validate/EFM/resources (for development)

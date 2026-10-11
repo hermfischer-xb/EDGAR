@@ -12,7 +12,9 @@ EFM one.  Which reference forms the message code, and with it the edgarCode and 
 alike by the messageCodes parameter, the guides in priority order (parseMessageCodes), default "EFM": with
 "EFM", an entry with an EFM reference keeps the code it has always had, and only an entry with no EFM reference
 takes its code from the other guide; with "EXG", every entry with an EXG reference takes its EXG code, without
-editing entries.  Listing more than one guide, such as "EXG EFM", also gives each message its full code under
+editing entries.  An entry with an EFM reference and no msgSection of its own takes the EXG reference that
+efm-exg-references.json gives its check (inferredMsgSection), so legacy checks are coded EXG without the entries
+being edited, and their messages carry exgSection in every mode.  Listing more than one guide, such as "EXG EFM", also gives each message its full code under
 each listed guide it has a reference to, as arguments efmCode and exgCode (messageGuideCodes), so that runs coded
 by different guides can be compared message by message.
 """
@@ -36,6 +38,29 @@ def parseMessageCodes(value):
         value = value.split()
     guides = tuple(str(v).strip().upper() for v in (value or ()) if str(v).strip())
     return guides or (messageCodeLeadingGuide,)
+
+def referencesIndex(resource):
+    """{(efm, validation, axis, concept): "EXG:section"} from the efm-exg-references.json resource."""
+    return {(r["efm"], r["validation"], r["axis"], r["concept"]): "EXG:" + r["exg"]
+            for r in (resource or {}).get("references", ())}
+
+def messageConcepts(logArgs, xbrlNames):
+    """The concepts a message is about, prefixed (dei: when unprefixed): its tag argument, else its tags argument
+    (comma-separated), else the entry's xbrl-names."""
+    if logArgs.get("tag"):
+        names = [logArgs["tag"]]
+    elif logArgs.get("tags"):
+        names = str(logArgs["tags"]).split(",")
+    else:
+        names = list(xbrlNames or ())
+    return [n if ":" in n else "dei:" + n for n in (str(n).strip() for n in names) if n]
+
+def inferredMsgSection(index, efm, validation, axis, concepts):
+    """The EXG reference (msgSection form, "EXG:3.1.22.1") of a legacy check that carries only an EFM reference, from
+    efm-exg-references.json (referencesIndex): when every concept the message names maps to the same EXG section;
+    otherwise None, and the message keeps its EFM reference only."""
+    sections = {index.get((efm, validation, axis or "", c)) for c in concepts}
+    return sections.pop() if len(sections) == 1 and None not in sections else None
 
 def messageCodePrefixes(efm, msgSection):
     """{guide: code prefix} for an entry's references, e.g. {"EFM": "EFM.6.05.20", "EXG": "EXG.3.01.05"}."""
