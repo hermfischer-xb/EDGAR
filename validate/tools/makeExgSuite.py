@@ -5,8 +5,12 @@ same relative path under the output directory, with its data paths made absolute
 them all, so the copy runs like the suite (for example with EDGAR-handoffs tools/runSuite.py --suite).  A report
 (twins.tsv) lists, per testcase file, the twins made and every failing variation left without one, and why.
 
+With --relative, data paths are left as they are, and only testcase files that gained twins are written: the
+output is then a drop-in set of testcase files for the suite's own folders (for merging into the suite source), with
+no index.
+
 Usage: python3 makeExgSuite.py <suite conf/testcases.xml> <efm-exg-references.json> <out dir> [<dir of a legacy-mode
-run's *.log.xml>]   (the logs give each twin its exact EXG section; see makeExgTwins.py --observed)
+run's *.log.xml>] [--relative]   (the logs give each twin its exact EXG section; see makeExgTwins.py --observed)
 """
 import contextlib, io, os, sys
 import xml.etree.ElementTree as ET
@@ -32,7 +36,7 @@ def leafTestcases(indexPath, seen=None):
     return out
 
 
-def main(indexPath, referencesPath, outDir, observedDir=None):
+def main(indexPath, referencesPath, outDir, observedDir=None, relative=False):
     suiteRoot = os.path.dirname(os.path.abspath(indexPath))
     leaves = leafTestcases(os.path.abspath(indexPath))
     observed = None
@@ -48,16 +52,20 @@ def main(indexPath, referencesPath, outDir, observedDir=None):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            makeExgTwins.main(path, referencesPath, out, absolute=True, observed=observed)
+            makeExgTwins.main(path, referencesPath, out, absolute=not relative, observed=observed)
         lines = buf.getvalue().splitlines()
         made = int(lines[0].split(": ")[1].split()[0]) if lines else 0
         skipped = [l.split(None, 5)[2:] for l in lines[1:] if l.strip().startswith("no twin:")]
+        if relative and not made:
+            os.remove(out)  # unchanged: nothing to merge
         totals[0] += made
         totals[1] += len(skipped)
         report.append("{}\t{}\t{}".format(rel, made, len(skipped)))
         for s in skipped:
             report.append("{}\t\t\t{}".format(rel, "\t".join(s)))
         uris.append(rel)
+    if relative:
+        uris = []
     with open(os.path.join(outDir, "testcases.xml"), "w", encoding="utf-8") as fh:
         fh.write('<?xml version="1.0" encoding="UTF-8"?>\n<testcases name="EFM suite with EXG twins">\n')
         for rel in uris:
@@ -69,6 +77,7 @@ def main(indexPath, referencesPath, outDir, observedDir=None):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (4, 5):
+    args = [a for a in sys.argv[1:] if a != "--relative"]
+    if len(args) not in (3, 4):
         sys.exit(__doc__)
-    main(*sys.argv[1:])
+    main(*args, relative="--relative" in sys.argv[1:])
