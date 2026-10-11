@@ -43,9 +43,10 @@ from .Consts import submissionTypesAllowingSeriesClasses, \
                     nsPatternNotAllowedinxBRLXML, subTypesWarningforxBRLXml
 
 from .Dimensions import checkFilingDimensions
-from .MessageReferences import messageSectionArgs, messageEdgarCode, messageCode, parseMessageCodes, messageGuideCodes
+from .MessageReferences import messageSectionArgs, messageEdgarCode, messageCode, parseMessageCodes, messageGuideCodes, \
+                               messageConcepts, inferredMsgSection
 from .PreCalAlignment import checkCalcsTreeWalk
-from .Util import conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
+from .Util import loadEfmExgReferences, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
                     loadUgtRelQnames, loadDqcRules, factBindings, leastDecimals, axisMemQnames, memChildQnames, \
                     loadTaxonomyCompatibility, loadIxTransformRegistries, ValueRange, loadXuleConstantsForPythonRules
@@ -160,6 +161,7 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
     deiDocumentType = None # needed for non-instance validation too
     # guides whose references form message codes, in priority order (messageCodes parameter; see MessageReferences)
     messageCodeGuides = parseMessageCodes(val.params.get("messageCodes"))
+    efmExgReferences = loadEfmExgReferences(modelXbrl) # EXG references for legacy checks with only an EFM one
     # efmSubmissionType and efmIxdsType are already set when re-validating after redaction/redline removal
     submissionType = getattr(modelXbrl,'efmSubmissionType', val.params.get("submissionType", ""))
     attachmentDocumentType = getattr(modelXbrl,'efmIxdsType', val.params.get("attachmentDocumentType", "")) # this is different from dei:documentType
@@ -1124,6 +1126,9 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                             logArgs[n] = "".join(v)
                 # the entry's EFM and other-guide (msgSection) references, as arguments and as the code (see MessageReferences)
                 _efm, _msgSection = logArgs.get("efmSection", sev.get("efm")), sev.get("msgSection")
+                if _efm and not _msgSection: # a legacy check: its EXG reference, if efm-exg-references.json gives one
+                    _msgSection = inferredMsgSection(efmExgReferences, _efm, sev.get("validation"), sev.get("axis", ""),
+                                                     messageConcepts(logArgs, sev.get("xbrl-names")))
                 logArgs.update(messageSectionArgs(_efm, _msgSection, messageCodeGuides))
                 logArgs["edgarCode"] = messageEdgarCode(messageKey, logArgs.get("arelleCode")) # edgar code is the un-expanded key for message with {...}'s
                 try:
