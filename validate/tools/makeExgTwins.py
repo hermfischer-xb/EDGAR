@@ -77,11 +77,14 @@ def insertTwinsAsText(text, twins):
             raise ValueError("variation {} not found as text".format(vid))
         block, pfx, indent = m.group("block"), m.group("p") or "", m.group("indent")
         twin = re.sub(r'\bid="{}"'.format(re.escape(vid)), 'id="{}-exg"'.format(vid), block, count=1)
-        elo = re.search(r'(<{}parameter\b[^>]*\bname="ELOparams"[^>]*\bvalue=")([^"]*)(")'.format(pfx), twin)
+        # the value may be quoted either way: value="{&quot;a&quot;: 1}" or value='{"a": 1}'; keep the file's quoting
+        elo = re.search(r'<{}parameter\b[^>]*\bname=["\']ELOparams["\'][^>]*\bvalue=(?P<q>["\'])(?P<v>.*?)(?P=q)'.format(pfx), twin, re.S)
         if elo:
-            value = json.loads(html.unescape(elo.group(2)))
+            value = json.loads(html.unescape(elo.group("v")))
             value["messageCodes"] = "EXG"
-            twin = twin[:elo.start(2)] + html.escape(json.dumps(value), quote=True).replace("&#x27;", "'") + twin[elo.end(2):]
+            escaped = json.dumps(value).replace("&", "&amp;").replace("<", "&lt;")
+            escaped = escaped.replace('"', "&quot;") if elo.group("q") == '"' else escaped.replace("'", "&apos;")
+            twin = twin[:elo.start("v")] + escaped + twin[elo.end("v"):]
         else:
             data = re.search(r'<{}data\b[^>]*>(\s*)'.format(pfx), twin)
             param = '<{}parameter name="ELOparams" datatype="xs:string" value="{{&quot;messageCodes&quot;: &quot;EXG&quot;}}"/>'.format(pfx)
