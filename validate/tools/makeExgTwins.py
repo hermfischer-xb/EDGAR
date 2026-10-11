@@ -46,8 +46,25 @@ def observedSections(logPaths):
             msg, ref = entry.find("message"), entry.find("ref")
             if not code.startswith("EFM.") or msg is None or ref is None or not msg.get("exgSection"):
                 continue
-            out[os.path.basename(ref.get("href") or "")].append((code, msg.get("tag") or msg.get("tags") or "", msg.get("exgSection")))
+            out[os.path.basename((ref.get("href") or "").partition("#")[0])].append((code, msg.get("tag") or msg.get("tags") or "", msg.get("exgSection")))
     return out
+
+
+def restoreNamespaceDeclarations(originalPath, outPath):
+    """ElementTree drops namespace declarations that only text content uses, such as xmlSchema in an expected error
+    written as a QName (<error>xmlSchema:valueError</error>); put the original root's declarations back."""
+    original = open(originalPath, encoding="utf-8", errors="replace").read()
+    rootTag = re.search(r"<(?![?!])[^>]*>", original)
+    decls = dict(re.findall(r'xmlns:(\w[\w.-]*)="([^"]*)"', rootTag.group(0))) if rootTag else {}
+    text = open(outPath, encoding="utf-8").read()
+    m = re.search(r"<(?![?!])[^>]*?(/?)>", text)
+    present = set(re.findall(r'xmlns:(\w[\w.-]*)=', m.group(0)))
+    missing = "".join(' xmlns:{}="{}"'.format(k, v) for k, v in decls.items() if k not in present)
+    if missing:
+        end = m.end() - (2 if m.group(1) else 1)
+        text = text[:end] + missing + text[end:]
+        with open(outPath, "w", encoding="utf-8") as fh:
+            fh.write(text)
 
 
 def exgSectionFromArg(arg):
@@ -117,6 +134,7 @@ def main(testcasePath, referencesPath, outPath, absolute=False, observed=None):
         root.insert(list(root).index(v) + 1, twin)
         made += 1
     tree.write(outPath, encoding="utf-8", xml_declaration=True)
+    restoreNamespaceDeclarations(testcasePath, outPath)
     print("{}: {} twins; {} failing variations without a twin".format(os.path.basename(testcasePath), made, len(skipped)))
     for s in skipped:
         print("  no twin:", *s)
