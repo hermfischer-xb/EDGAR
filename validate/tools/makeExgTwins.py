@@ -17,7 +17,7 @@ original (same relative instance paths) or elsewhere with --absolute, which rewr
 
 Usage: python3 makeExgTwins.py <testcase.xml> <efm-exg-references.json> <out.xml> [--absolute] [--observed <dir of *.log.xml>]
 """
-import collections, copy, json, os, re, sys
+import collections, copy, html, json, os, re, sys
 import xml.etree.ElementTree as ET
 
 CONF = "http://edgar/2009/conformance"
@@ -67,6 +67,32 @@ def restoreNamespaceDeclarations(originalPath, outPath):
             fh.write(text)
 
 
+def insertTwinsAsText(text, twins):
+    """The testcase file's own text with a twin of each listed variation inserted after it, so that a merge into the
+    suite source shows only added lines.  twins: [(variation id, EXG code prefix)]."""
+    for vid, prefix in twins:
+        m = re.search(r'(?P<indent>[ \t]*)(?P<block><(?P<p>\w+:)?variation\b[^>]*\bid="{}"[^>]*>.*?</(?P=p)?variation>)'
+                      .format(re.escape(vid)), text, re.S)
+        if not m:
+            raise ValueError("variation {} not found as text".format(vid))
+        block, pfx, indent = m.group("block"), m.group("p") or "", m.group("indent")
+        twin = re.sub(r'\bid="{}"'.format(re.escape(vid)), 'id="{}-exg"'.format(vid), block, count=1)
+        elo = re.search(r'(<{}parameter\b[^>]*\bname="ELOparams"[^>]*\bvalue=")([^"]*)(")'.format(pfx), twin)
+        if elo:
+            value = json.loads(html.unescape(elo.group(2)))
+            value["messageCodes"] = "EXG"
+            twin = twin[:elo.start(2)] + html.escape(json.dumps(value), quote=True).replace("&#x27;", "'") + twin[elo.end(2):]
+        else:
+            data = re.search(r'<{}data\b[^>]*>(\s*)'.format(pfx), twin)
+            param = '<{}parameter name="ELOparams" datatype="xs:string" value="{{&quot;messageCodes&quot;: &quot;EXG&quot;}}"/>'.format(pfx)
+            twin = twin[:data.end(0) - len(data.group(1))] + data.group(1) + param + data.group(1) + twin[data.end(0):]
+        twin = re.sub(r'(<{}name>)'.format(pfx), r'\1EXG mode: ', twin, count=1)
+        twin = re.sub(r'(<{}assert\b[^>]*\bnum=")[^"]*(")'.format(pfx), r'\g<1>{}\2'.format(prefix), twin, count=1)
+        newline = "\r\n" if "\r\n" in text else "\n"
+        text = text[:m.end("block")] + newline + indent + twin + text[m.end("block"):]
+    return text
+
+
 def exgSectionFromArg(arg):
     """The exgSection argument ("30105", "3012201") as a section ("3.1.5", "3.1.22.1"): one-digit chapter, then
     two-digit levels."""
@@ -85,7 +111,7 @@ def main(testcasePath, referencesPath, outPath, absolute=False, observed=None):
     tree = ET.parse(testcasePath)
     root = tree.getroot()
     base = os.path.dirname(os.path.abspath(testcasePath))
-    made, skipped = 0, []
+    made, skipped, twins = 0, [], []
     children = list(root)
     for v in children:
         if v.tag.split("}")[-1] != "variation":  # EDGAR's conformance namespace, or XBRL's (the fee testcases)
@@ -113,6 +139,7 @@ def main(testcasePath, referencesPath, outPath, absolute=False, observed=None):
         if len(sections) != 1:
             skipped.append((v.get("id"), a.get("num"), a.get("name"), "no reference" if not sections else "several: " + ", ".join(sorted(sections))))
             continue
+        twins.append((v.get("id"), exgPrefix(next(iter(sections)))))
         twin = copy.deepcopy(v)
         twin.set("id", v.get("id") + "-exg")
         for nm in twin.iter("{%s}name" % CONF):
@@ -133,8 +160,14 @@ def main(testcasePath, referencesPath, outPath, absolute=False, observed=None):
         ta.set("num", exgPrefix(next(iter(sections))))
         root.insert(list(root).index(v) + 1, twin)
         made += 1
-    tree.write(outPath, encoding="utf-8", xml_declaration=True)
-    restoreNamespaceDeclarations(testcasePath, outPath)
+    if absolute:
+        tree.write(outPath, encoding="utf-8", xml_declaration=True)
+        restoreNamespaceDeclarations(testcasePath, outPath)
+    else:  # for merging into the suite source: the original text with each twin inserted after its original
+        with open(testcasePath, encoding="utf-8", newline="") as fh:  # keep the file's own line endings
+            original = fh.read()
+        with open(outPath, "w", encoding="utf-8", newline="") as fh:
+            fh.write(insertTwinsAsText(original, twins))
     print("{}: {} twins; {} failing variations without a twin".format(os.path.basename(testcasePath), made, len(skipped)))
     for s in skipped:
         print("  no twin:", *s)
