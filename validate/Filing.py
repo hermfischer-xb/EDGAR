@@ -1127,8 +1127,12 @@ def validateFiling(val, modelXbrl, isEFM=False, isGFM=False):
                 # the entry's EFM and other-guide (msgSection) references, as arguments and as the code (see MessageReferences)
                 _efm, _msgSection = logArgs.get("efmSection", sev.get("efm")), sev.get("msgSection")
                 if _efm and not _msgSection: # a legacy check: its EXG reference, if efm-exg-references.json gives one
-                    _msgSection = inferredMsgSection(efmExgReferences, _efm, sev.get("validation"), sev.get("axis", ""),
-                                                     messageConcepts(logArgs, sev.get("xbrl-names")))
+                    if sev.get("validation") in ("(blank)", "(blank-error)"): # the implicit unexpected-fact check
+                        _msgSection = inferredMsgSection(efmExgReferences, _efm, "(unexpected)", "",
+                                                         messageConcepts(logArgs, ()))
+                    else:
+                        _msgSection = inferredMsgSection(efmExgReferences, _efm, sev.get("validation"), sev.get("axis", ""),
+                                                         messageConcepts(logArgs, sev.get("xbrl-names")))
                 logArgs.update(messageSectionArgs(_efm, _msgSection, messageCodeGuides))
                 logArgs["edgarCode"] = messageEdgarCode(messageKey, logArgs.get("arelleCode")) # edgar code is the un-expanded key for message with {...}'s
                 try:
