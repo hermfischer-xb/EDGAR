@@ -25,6 +25,12 @@ Candidates, by the rulings in resources/exg/handoffs/mapping-rulings.md:
 Tiers in the output: "code" (one section, and the row's EFM cell code is the legacy validation code), "section" (one
 section, EFM section agrees but the cell code does not), "ruling", "several" (for review), "none" (unlinked).
 
+Also written: absence-candidates.tsv, for the legacy file's implicit absence check.  Filing.py reports a concept
+unexpected (from a "(blank)" or "(blank-error)" entry) with the EFM section of the entries that name the concept
+for that context; EXG states the same check as "A {n} fact is absent." rows.  Each (EFM section of an entry naming
+the concept, concept) maps to the section of the concept's absence row in a context compatible with that entry's
+axis key, with the business-contact phone ruled to 3.2.1.4 as for the other checks.
+
 Usage: python3 references.py <crosswalk out dir with crosswalk.json> <guide.json> <plugin validate dir> <out dir>
 """
 import collections, csv, json, os, re, sys
@@ -185,6 +191,54 @@ def main(crosswalkDir, guidePath, validateDir, outDir):
     with open(os.path.join(outDir, "candidates.json"), "w") as fh:
         json.dump(out, fh, indent=1)
     writeSpotCheck(out, dei, os.path.join(outDir, "spot-check.md"))
+    writeAbsence(guide, concepts, entries, os.path.join(outDir, "absence-candidates.tsv"))
+
+
+def normaliseNames(names):
+    """An entry's xbrl-names as prefixed concepts (dei: when unprefixed)."""
+    names = names if isinstance(names, list) else [names]
+    return [n if ":" in n else "dei:" + n for n in names if isinstance(n, str)]
+
+
+ABSENCE_RULINGS = {("dei:LocalPhoneNumber", "a"): "3.2.1.4"}  # as RULINGS: the business-contact phone is 3.2.1.4
+
+
+def writeAbsence(guide, concepts, entries, path):
+    """Implicit absence: (EFM section, concept) of a legacy "unexpected" message -> EXG absence-row section."""
+    absent = collections.defaultdict(list)
+    for v in guide["validations"]:
+        sec = v["Section"]
+        if not sec.startswith("3.") or sec == "3.1.1" or v.get("rowDeleted"):
+            continue
+        m = re.match(r"^A (\{\d+\}) fact is absent\.?$", (v.get("Check") or v.get("Assertion") or "").strip())
+        if m and concepts[sec].get(m.group(1)):
+            absent[concepts[sec][m.group(1)]].append((sec, v["Row"], (v.get("c") or "").strip()))
+    pairs = collections.OrderedDict()  # (efm, concept) -> set of axis keys
+    for e in entries:
+        if e.get("validation") in (None, "fany") or all(k.startswith("comment") for k in e) or not e.get("efm"):
+            continue
+        for n in normaliseNames(e.get("xbrl-names", e.get("xbrl-name"))):
+            pairs.setdefault((e["efm"], n), set()).add(e.get("axis", ""))
+    rows = []
+    for (efm, name), axes in pairs.items():
+        if name not in absent:
+            continue
+        secs, used = set(), []
+        for axis in sorted(axes):
+            ruling = ABSENCE_RULINGS.get((name, axis))
+            cand = [r for r in absent[name] if r[2] in COMPATIBLE.get(axis, {"r", "se", "a", ""})]
+            if ruling:
+                secs.add(ruling); used += [r for r in cand if r[0] == ruling]
+            else:
+                secs |= {r[0] for r in cand}; used += cand
+        tier = "absence" if len(secs) == 1 else ("several" if secs else "none")
+        rows.append([efm, "(unexpected)", "", name, tier, ",".join(sorted(secs)) if tier != "absence" else secs.pop(),
+                     " | ".join("{}#{} c={}".format(*r) for r in used), " ".join(sorted(axes))])
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh, delimiter="\t")
+        w.writerow(["efm", "validation", "axis", "concept", "tier", "exgSection", "candidates", "legacyAxes"])
+        w.writerows(rows)
+    print(len(rows), "absence pairs:", dict(collections.Counter(r[4] for r in rows)))
 
 
 def writeSpotCheck(out, dei, path):

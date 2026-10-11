@@ -5,7 +5,8 @@ same relative path under the output directory, with its data paths made absolute
 them all, so the copy runs like the suite (for example with EDGAR-handoffs tools/runSuite.py --suite).  A report
 (twins.tsv) lists, per testcase file, the twins made and every failing variation left without one, and why.
 
-Usage: python3 makeExgSuite.py <suite conf/testcases.xml> <efm-exg-references.json> <out dir>
+Usage: python3 makeExgSuite.py <suite conf/testcases.xml> <efm-exg-references.json> <out dir> [<dir of a legacy-mode
+run's *.log.xml>]   (the logs give each twin its exact EXG section; see makeExgTwins.py --observed)
 """
 import contextlib, io, os, sys
 import xml.etree.ElementTree as ET
@@ -31,9 +32,13 @@ def leafTestcases(indexPath, seen=None):
     return out
 
 
-def main(indexPath, referencesPath, outDir):
+def main(indexPath, referencesPath, outDir, observedDir=None):
     suiteRoot = os.path.dirname(os.path.abspath(indexPath))
     leaves = leafTestcases(os.path.abspath(indexPath))
+    observed = None
+    if observedDir:
+        import glob
+        observed = makeExgTwins.observedSections(glob.glob(os.path.join(observedDir, "*.log.xml")))
     report = ["testcase\ttwins\tno twin\tvariation\tnum\tname\treason"]
     totals = [0, 0]
     uris = []
@@ -43,7 +48,7 @@ def main(indexPath, referencesPath, outDir):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            makeExgTwins.main(path, referencesPath, out, absolute=True)
+            makeExgTwins.main(path, referencesPath, out, absolute=True, observed=observed)
         lines = buf.getvalue().splitlines()
         made = int(lines[0].split(": ")[1].split()[0]) if lines else 0
         skipped = [l.split(None, 5)[2:] for l in lines[1:] if l.strip().startswith("no twin:")]
@@ -64,6 +69,6 @@ def main(indexPath, referencesPath, outDir):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         sys.exit(__doc__)
     main(*sys.argv[1:])

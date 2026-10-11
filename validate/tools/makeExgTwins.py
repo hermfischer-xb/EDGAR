@@ -3,14 +3,19 @@
 For each variation that expects a failure (<conf:assert num="60520" name="DocumentType" .../>), a twin is added
 right after it: id "<id>-exg", the same data, "messageCodes": "EXG" added to its ELOparams, and an assert whose num
 is the EXG code prefix the check would carry in EXG mode (num="EXG.3.01.05"; Arelle matches an EXG num as a code
-prefix).  The EXG section comes from efm-exg-references.json: every reference for the assert's EFM section and
-concept must give the same section, or the variation gets no twin and is reported.  An assert that already expects
+prefix).  The EXG section comes either
+  - with --observed <logs>, from a legacy-mode run of the suite on a plugin that reads efm-exg-references.json: the
+    exgSection argument of the messages, for that variation's instance, whose code begins with the assert's EFM
+    code.  That is exactly the section the plugin's lookup gives the message, so it is the precise source; or
+  - otherwise, from efm-exg-references.json by the assert's EFM section and concept alone, which is ambiguous where
+    one concept is checked by several legacy validations in different sections.
+When the source gives no section, or more than one, the variation gets no twin and is reported.  An assert that already expects
 an EXG code, or names no mapped concept, gets no twin either; the run shows those as EFM-coded in EXG mode.
 
 The original variations are kept unchanged, so one run checks both modes.  The output can be written beside the
 original (same relative instance paths) or elsewhere with --absolute, which rewrites data URIs to absolute paths.
 
-Usage: python3 makeExgTwins.py <testcase.xml> <efm-exg-references.json> <out.xml> [--absolute]
+Usage: python3 makeExgTwins.py <testcase.xml> <efm-exg-references.json> <out.xml> [--absolute] [--observed <dir of *.log.xml>]
 """
 import collections, copy, json, os, re, sys
 import xml.etree.ElementTree as ET
@@ -29,7 +34,29 @@ def exgPrefix(section):
     return "EXG." + ".".join([parts[0]] + [p.zfill(2) for p in parts[1:]])
 
 
-def main(testcasePath, referencesPath, outPath, absolute=False):
+def observedSections(logPaths):
+    """{instance file name: [(code, tag, exgSection)]} from Arelle XML logs of a legacy-mode suite run.  A log entry's
+    ref is the instance's file name, which in the EFM suite is unique (it encodes the variation)."""
+    out = collections.defaultdict(list)
+    for path in logPaths:
+        # an Arelle XML log file can hold several <log> documents one after another (it appends), so wrap them
+        text = re.sub(r"<\?xml[^>]*\?>", "", open(path, encoding="utf-8", errors="replace").read())
+        for entry in ET.fromstring("<logs>" + text + "</logs>").iter("entry"):
+            code = entry.get("code") or ""
+            msg, ref = entry.find("message"), entry.find("ref")
+            if not code.startswith("EFM.") or msg is None or ref is None or not msg.get("exgSection"):
+                continue
+            out[os.path.basename(ref.get("href") or "")].append((code, msg.get("tag") or msg.get("tags") or "", msg.get("exgSection")))
+    return out
+
+
+def exgSectionFromArg(arg):
+    """The exgSection argument ("30105", "3012201") as a section ("3.1.5", "3.1.22.1"): one-digit chapter, then
+    two-digit levels."""
+    return ".".join([arg[0]] + [str(int(arg[i:i + 2])) for i in range(1, len(arg), 2)])
+
+
+def main(testcasePath, referencesPath, outPath, absolute=False, observed=None):
     refs = json.load(open(referencesPath, encoding="utf-8"))["references"]
     byEfmConcept = collections.defaultdict(set)
     for r in refs:
@@ -44,20 +71,28 @@ def main(testcasePath, referencesPath, outPath, absolute=False):
     made, skipped = 0, []
     children = list(root)
     for v in children:
-        if v.tag != "{%s}variation" % CONF:
+        if v.tag.split("}")[-1] != "variation":  # EDGAR's conformance namespace, or XBRL's (the fee testcases)
             continue
-        if absolute:
-            for d in v.iter():
-                if d.tag in ("{%s}instance" % CONF, "{%s}schema" % CONF, "{%s}linkbase" % CONF) and d.text:
-                    d.text = os.path.join(base, d.text.strip())
-        asserts = v.findall(".//{%s}assert" % CONF)
+        dataFiles = [d for data in v.iter() if data.tag.split("}")[-1] == "data" for d in data
+                     if d.text and d.text.strip() and os.path.exists(os.path.join(base, d.text.strip()))]
+        instancePaths = [os.path.basename(d.text.strip()) for d in dataFiles if d.tag.split("}")[-1] == "instance"]
+        if absolute:  # any data file named relative to the testcase, whatever the testcase namespace
+            for d in dataFiles:
+                d.text = os.path.join(base, d.text.strip())
+        asserts = v.findall(".//{%s}assert" % CONF)  # only EDGAR-namespace testcases carry EFM-section asserts
         if not asserts:
             continue
         a = asserts[0]
         efm = efmSection(a.get("num"))
         concept = a.get("name") or ""
         concept = concept if ":" in concept else "dei:" + concept
-        sections = byEfmConcept.get((efm, concept), set()) if efm else set()
+        if observed is not None and efm:
+            prefix = "EFM.{}.{}.{}".format(*[p if i == 0 else p.zfill(2) for i, p in enumerate(efm.split("."))])
+            msgs = [m for ip in instancePaths for m in observed.get(ip, ()) if m[0].startswith(prefix)]
+            named = [m for m in msgs if (a.get("name") or "") in m[1]] or msgs
+            sections = {exgSectionFromArg(m[2]) for m in named}
+        else:
+            sections = byEfmConcept.get((efm, concept), set()) if efm else set()
         if len(sections) != 1:
             skipped.append((v.get("id"), a.get("num"), a.get("name"), "no reference" if not sections else "several: " + ", ".join(sorted(sections))))
             continue
@@ -88,6 +123,15 @@ def main(testcasePath, referencesPath, outPath, absolute=False):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (4, 5):
+    args = sys.argv[1:]
+    absolute = "--absolute" in args
+    observed = None
+    if "--observed" in args:
+        i = args.index("--observed")
+        import glob
+        observed = observedSections(glob.glob(os.path.join(args[i + 1], "*.log.xml")))
+        del args[i:i + 2]
+    args = [a for a in args if a != "--absolute"]
+    if len(args) != 3:
         sys.exit(__doc__)
-    main(*sys.argv[1:4], absolute=len(sys.argv) == 5 and sys.argv[4] == "--absolute")
+    main(*args, absolute=absolute, observed=observed)

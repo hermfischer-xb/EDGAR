@@ -6,17 +6,25 @@ EDGAR XBRL Guide section whose code it carries in EXG mode.  Only reviewed refer
 made in review, ../handoffs/mapping-rulings.md), "code" (the row's EFM cell code is the legacy validation code) and "section"
 (confirmed by a sample review of review-first.md).  Duplicate keys must agree, or the build stops.
 
-Usage: python3 buildReferences.py <candidates.tsv> <edition> <review note> <out efm-exg-references.json>
+The implicit absence check (absence-candidates.tsv, tier "absence") is keyed by validation "(unexpected)" and no axis:
+the legacy file reports such a message from its "(blank)" or "(blank-error)" entries, with the EFM section of the
+entries naming the concept, which identifies the context.
+
+Usage: python3 buildReferences.py <candidates.tsv> <absence-candidates.tsv> <edition> <review note> <out efm-exg-references.json>
 """
 import csv, json, sys
 
-REVIEWED = ("ruling", "code", "section")
+REVIEWED = ("ruling", "code", "section", "absence")
 
 
-def main(candidatesPath, edition, reviewNote, outPath):
+def main(candidatesPath, absencePath, edition, reviewNote, outPath):
     refs = {}
-    with open(candidatesPath, newline="") as fh:
-        for r in csv.DictReader(fh, delimiter="\t"):
+    candidates = []
+    for path in (candidatesPath, absencePath):
+        with open(path, newline="") as fh:
+            candidates.extend(csv.DictReader(fh, delimiter="\t"))
+    if True:
+        for r in candidates:
             if r["tier"] not in REVIEWED:
                 continue
             key = (r["efm"], r["validation"], r["axis"], r["concept"])
@@ -36,7 +44,8 @@ def main(candidatesPath, edition, reviewNote, outPath):
             "parameter lists EXG first, and which every message from such a check gives as its exgSection argument.",
             "rows are the EXG section 3 rows the reference rests on (section#row). basis: ruling (decided in review),",
             "code (the row's EFM cell code is the validation code), section (concept and EFM section agree; confirmed",
-            "by sample review). Generated; do not edit by hand. Published for filing preparers and consumers of",
+            "by sample review), absence (the legacy implicit unexpected-fact check, validation (unexpected), to the",
+            "concept's EXG absence row). Generated; do not edit by hand. Published for filing preparers and consumers of",
             "disseminated filings who meet EXG codes for the first time."],
         "edition": edition,
         "review": reviewNote,
@@ -52,6 +61,6 @@ def main(candidatesPath, edition, reviewNote, outPath):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 6:
         sys.exit(__doc__)
     main(*sys.argv[1:])

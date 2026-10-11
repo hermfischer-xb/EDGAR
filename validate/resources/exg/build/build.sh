@@ -12,10 +12,12 @@ python3 "$HERE/extractSets.py" "$DOCX" "$VALIDATE/resources/exg-set-definitions.
 python3 "$HERE/extract.py" "$DOCX" "$WORK/guide.json"
 python3 "$VALIDATE/tools/crosswalk.py" "$VALIDATE" "$WORK/guide.json" "$WORK/crosswalk"
 python3 "$VALIDATE/tools/references.py" "$WORK/crosswalk" "$WORK/guide.json" "$VALIDATE" "$WORK/refs"
-python3 "$HERE/buildReferences.py" "$HERE/references-candidates.tsv" "$EDITION" "$REVIEW" "$VALIDATE/resources/efm-exg-references.json"
-if cmp -s "$WORK/refs/candidates.tsv" "$HERE/references-candidates.tsv"; then
-    echo "reference candidates unchanged"
-else
-    echo "reference candidates CHANGED: review $WORK/refs/candidates.tsv against $HERE/references-candidates.tsv"
-fi
+python3 "$HERE/buildReferences.py" "$HERE/references-candidates.tsv" "$HERE/absence-candidates.tsv" "$EDITION" "$REVIEW" "$VALIDATE/resources/efm-exg-references.json"
+for f in candidates.tsv:references-candidates.tsv absence-candidates.tsv:absence-candidates.tsv; do
+    if cmp -s "$WORK/refs/${f%%:*}" "$HERE/${f##*:}"; then
+        echo "${f##*:} unchanged"
+    else
+        echo "${f##*:} CHANGED: review $WORK/refs/${f%%:*} against $HERE/${f##*:}"
+    fi
+done
 echo "work files in $WORK"
