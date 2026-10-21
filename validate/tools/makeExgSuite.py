@@ -64,13 +64,12 @@ def main(indexPath, referencesPath, outDir, observedDir=None, relative=False):
         for s in skipped:
             report.append("{}\t\t\t{}".format(rel, "\t".join(s)))
         uris.append(rel)
-    if relative:
-        uris = []
-    with open(os.path.join(outDir, "testcases.xml"), "w", encoding="utf-8") as fh:
-        fh.write('<?xml version="1.0" encoding="UTF-8"?>\n<testcases name="EFM suite with EXG twins">\n')
-        for rel in uris:
-            fh.write('  <testcase uri="{}"/>\n'.format(rel))
-        fh.write("</testcases>\n")
+    if not relative:  # a relative output is copied over the suite's own files, so it must not hold an index
+        with open(os.path.join(outDir, "testcases.xml"), "w", encoding="utf-8") as fh:
+            fh.write('<?xml version="1.0" encoding="UTF-8"?>\n<testcases name="EFM suite with EXG twins">\n')
+            for rel in uris:
+                fh.write('  <testcase uri="{}"/>\n'.format(rel))
+            fh.write("</testcases>\n")
     with open(os.path.join(outDir, "twins.tsv"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(report) + "\n")
     print("{} testcase files; {} twins; {} failing variations without a twin".format(len(leaves), *totals))
