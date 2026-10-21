@@ -21,8 +21,8 @@ which names the legal exhibit.
 
 Entity sets are a property of the registrant.  Inside EDGAR, where the registration database is available to the
 caller of Arelle, they are passed as the parameter entitySets.  Elsewhere they are determined from the submission
-itself by the rules in determineEntitySets, which are OUR PROPOSAL (EDGAR-handoffs,
-streams/exg-conversion/entity-sets-proposal.md), not EXG text.  When the parameter is given it decides, and the
+itself by the rules in determineEntitySets, which are OUR PROPOSAL (resources/exg/handoffs/README.md,
+"Entity sets"), not EXG text.  When the parameter is given it decides, and the
 determined sets are still computed so that a disagreement can be logged.
 
 Instance of a submission vs. the submission: Table 6-4 is cumulative over a submission, but a validation runs on one
@@ -329,7 +329,7 @@ def resolveInstanceTypes(setDefinitions, submissionType, documentType=None, atta
 # Scope cells.  EXG section 3 scopes each rule by its Incl and Excl cells: "s: AF, QF, i: AF.US, AF.BDC" names
 # submission sets after "s:" and instance types after "i:".  A rule applies to an instance when its Incl cell
 # matches and its Excl cell does not.  The readings below are OURS, to confirm with the EXG author; the crosswalk
-# (EDGAR-handoffs, streams/exg-conversion/crosswalk) uses these same functions:
+# (validate/tools/crosswalk.py) uses these same functions:
 #   - an instance that is itself an exhibit named by a Table 6-4 row (the fee exhibit, EX-98, EX-2.01, ...) is in a
 #     submission set for "s:" only where that set holds nothing but exhibits (FE, SE, TO): an 8-K's Exhibit 98 is
 #     EX98.SPAC, not "s: 8K";

@@ -333,6 +333,7 @@ def loadRequiredContextRulings(modelXbrl):
     return _requiredContextRulingsCache[path]
 
 _setDefinitionsCache = {}
+_efmExgReferencesCache = {}
 def loadSetDefinitions(modelXbrl):
     """EXG 1.1 Set Definitions, Tables 6-1 to 6-4 (resources/exg-set-definitions.json, generated from the guide; see
     InstanceTypes.py), loaded once."""
@@ -342,7 +343,7 @@ def loadSetDefinitions(modelXbrl):
         _setDefinitionsCache[path] = json.load(_file)
         _file.close()
     return _setDefinitionsCache[path]
-_efmExgReferencesCache = {}
+
 def loadEfmExgReferences(modelXbrl):
     """EXG references for legacy checks with only an EFM reference (resources/efm-exg-references.json, generated; see
     MessageReferences.inferredMsgSection), indexed and loaded once."""
@@ -352,7 +353,6 @@ def loadEfmExgReferences(modelXbrl):
         _efmExgReferencesCache[path] = referencesIndex(json.load(_file))
         _file.close()
     return _efmExgReferencesCache[path]
-
 
 def resourcesFilePath(modelManager, *paths):
     # resourcesDir can be in cache dir (production) or in validate/EFM/resources (for development)

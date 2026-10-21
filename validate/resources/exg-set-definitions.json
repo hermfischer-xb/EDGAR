@@ -1,5 +1,5 @@
 {
- "comment": "EXG 1.1 Set Definitions, generated from the EDGAR XBRL Guide, September 2026 draft (xbrl-guide_Sept26.docx), Tables 6-1 to 6-4, by extractSets.py (EDGAR-handoffs streams/exg-conversion/guide-tables). Do not edit by hand: regenerate.",
+ "comment": "EXG 1.1 Set Definitions, generated from the EDGAR XBRL Guide, September 2026 draft (xbrl-guide_Sept26.docx), Tables 6-1 to 6-4, by extractSets.py (validate/resources/exg/build). Do not edit by hand: regenerate.",
  "edition": "September 2026 draft (xbrl-guide_Sept26.docx)",
  "submissionSets": {
   "6K": {

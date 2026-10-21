@@ -51,7 +51,7 @@ from .RequiredContext import edgarDateParamValue, requiredContextEligibleContext
                                contextLastDay, selectRequiredContext, contextPeriodText, selectCoverAnchoredContext, \
                                FEE_EXHIBIT_ANCHORS, selectFeeExhibitRequiredContext
 from .InstanceTypes import resolveInstanceTypes, scopeApplies
-from .Util import loadEfmExgReferences, loadSetDefinitions, loadRequiredContextRulings, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
+from .Util import loadSetDefinitions, loadEfmExgReferences, loadRequiredContextRulings, conflictClassFromNamespace, abbreviatedNamespace, NOYEAR, WITHYEARandWILD, loadDeprecatedConceptDates, \
                     loadCustomAxesReplacements, loadNonNegativeFacts, loadDeiValidations, loadOtherStandardTaxonomies, \
                     loadUgtRelQnames, loadDqcRules, factBindings, leastDecimals, axisMemQnames, memChildQnames, \
                     loadTaxonomyCompatibility, loadIxTransformRegistries, ValueRange, loadXuleConstantsForPythonRules

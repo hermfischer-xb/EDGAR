@@ -52,16 +52,16 @@ Input file parameters may be in JSON (without newlines for pretty printing as be
    "entitySets": ["US", "SPAC"], # EDGAR XBRL Guide (EXG) entity sets (Table 6-3 codes) of the registrant, from the
                                  # registration database; a list in JSON, or one blank-separated string from formula or
                                  # GUI parameters.  When absent they are determined from the submission (InstanceTypes.py)
+   "messageCodes": ["EXG", "EFM"], # guides whose references form message codes, in priority order; default "EFM".
+                                   # "EXG" codes a message by its EDGAR XBRL Guide reference where it has one; "EFM"
+                                   # requests the legacy EDGAR Filer Manual codes.  Listing both also gives each message
+                                   # efmCode and exgCode arguments, for comparing runs coded differently.  A list in
+                                   # JSON, or one blank-separated string from formula or GUI parameters ("EXG EFM")
    "logInstanceTypes": true/false, # log one info message per instance (code EDGAR.instanceTypes) naming its EXG instance
                                    # types (Table 6-4), submission sets and entity sets, and how each was decided
    "requiredContextShadow": "cover" or absent, # log one info message per filing (code EDGAR.requiredContextShadow)
                                      # comparing a cover-anchored selection (Filing.selectCoverAnchoredContext) with
                                      # the required context; batch analysis only, validation is unaffected
-    "messageCodes": ["EXG", "EFM"], # guides whose references form message codes, in priority order; default "EFM".
-                                    # "EXG" codes a message by its EDGAR XBRL Guide reference where it has one; "EFM"
-                                    # requests the legacy EDGAR Filer Manual codes.  Listing both also gives each message
-                                    # efmCode and exgCode arguments, for comparing runs coded differently.  A list in
-                                    # JSON, or one blank-separated string from formula or GUI parameters ("EXG EFM")
    # CEF forms
    "eligibleFundFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
    "pursuantGeneralInstructionFlag": true/false, # JSON Boolean, string Yes/No, yes/no, Y/N, y/n or absent
