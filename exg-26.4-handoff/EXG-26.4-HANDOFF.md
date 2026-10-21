@@ -1,34 +1,52 @@
-# EDGAR XBRL Guide (EXG) work for EDGAR 26.4: three pull requests, and how to apply them
+# EDGAR XBRL Guide (EXG) work for EDGAR 26.4: EXG message codes now, required context next
 
 This handoff is for an AI coding assistant working inside SEC in the EDGAR plugin repository, and for the developer
-working with it. It describes three changes prepared on the public fork `hermfischer-xb/EDGAR`, each for its own
-pull request, and how to bring each onto SEC's 26.3 branch or the 26.4 work in progress. The EDGAR team decides which
-to take for 26.4. Each can be taken alone, except that Pull 2 contains Pull 1.
+working with it. It describes changes prepared on the public fork `hermfischer-xb/EDGAR` and how to bring them onto
+SEC's 26.3 branch or the 26.4 work in progress.
 
-## The three pulls
+**Revised 2026-10-21.** The EDGAR team takes the EXG message codes for 26.4 and defers the required context to a
+later sprint. The message-codes pull has therefore been rebuilt so that it no longer contains the required-context
+work, and the required-context work has been rebased on top of it for the later sprint. The earlier arrangement, in
+which Pull 2 contained Pull 1, is kept on the fork for reference only (see "Earlier branches" below).
 
-| Pull | Branch on the fork | Commits | Risk | What it does |
-|---|---|---:|---|---|
-| DQC removal | `hf-exg-dqc-removal` | 1 | separate decision | Removes the hand-coded Python implementations of DQC.US rules (`b9df825`). Unrelated to EXG. |
-| Pull 1: required context | `exg-26.4-pull1-required-context` | 23 | lowest | Selects the required context by the EXG ordering, adds the EXG 3.1.2 header check, the instance-type resolver and the parameters it uses. No change to message codes. |
-| Pull 2: EXG message codes | `exg-26.4-pull2-message-codes` | Pull 1 + 11 | medium | Everything in Pull 1. Messages carry both EFM and EXG references; the `messageCodes` parameter; `efm-exg-references.json`; the tools that build it; the generator for the dual-coded conformance suite. |
+## The pulls
+
+| Pull | Branch on the fork | Base | Commits | What it does |
+|---|---|---|---:|---|
+| **26.4: EXG message codes** | `exg-26.4-message-codes` | 26.3 `4891c4c` | 14 | Messages carry both EFM and EXG references; the `messageCodes` parameter; `efm-exg-references.json`; the tools that build it; the generator for the dual-coded conformance suite. No change to how contexts are selected. |
+| **Next sprint: required context** | `exg-next-required-context` | `exg-26.4-message-codes` | 24 | Selects the required context by the EXG ordering, adds the EXG 3.1.2 header check, wires in the instance-type resolver and the parameters it uses. |
+| DQC removal | `hf-exg-dqc-removal` | 26.3 `4891c4c` | 1 | Removes the hand-coded Python implementations of DQC.US rules (`b9df825`). Unrelated to EXG; a separate decision. |
 
 Branch heads as handed over:
 
 | Branch | Head | Tree |
 |---|---|---|
+| `exg-26.4-message-codes` | `c524d67` | `8a755c129657e1e39f7ed16daa23dc9b8b8da4a7` |
+| `exg-next-required-context` | `55bd833` | `c1a25bc2d8b7f6d80f78b8af9dd54b1ca55795c2` |
 | `hf-exg-dqc-removal` | `b9df825` | |
-| `exg-26.4-pull1-required-context` | `68541d2` | `aa4ab989bff997b8a964c6416fa00db4765ffe52` |
-| `exg-26.4-pull2-message-codes` | `5c290dd` | `7d9b056d3d0ff69f3c512d5b872973ef76a0f793` |
 
-This handoff, the unit tests and the two conformance-suite packages are on the doc-only branch `exg-26.4-handoff`,
-in the folder `exg-26.4-handoff/`.
+This handoff, the unit tests and the conformance-suite packages are on the doc-only branch `exg-26.4-handoff`, in the
+folder `exg-26.4-handoff/`.
 
-All three branches are based on public EDGAR 26.3, commit `4891c4c` ("Merge pull request #68 from
-freddym56/edgar26.3"). Each branch's history is linear: the commits are the originals, with their messages, and
-`(cherry picked from commit …)` lines that point to where they were developed.
+**How the message-codes pull stands alone.**
+- Its first commit, `f6e3332`, adds `validate/InstanceTypes.py` and `validate/resources/exg-set-definitions.json`
+  (EXG Tables 6-1 to 6-4 and their resolver). The EXG tooling in `validate/tools/` and `validate/resources/exg/build/`
+  uses them to evaluate the guide's scope cells. **Nothing at run time calls them in 26.4:** `Filing.py` does not
+  import them until the required-context pull wires them in.
+- The other commits are the message-code commits of the earlier Pull 2, replayed onto 26.3. Their only conflicts were
+  in lists both pulls extend: the parameter documentation and parameter-name sets in `validate/__init__.py`, the
+  `.Util` import line in `Filing.py`, and the loaders in `Util.py`. Each keeps 26.3's lines plus `messageCodes` and
+  `loadEfmExgReferences`.
+- Two tool fixes were added on 2026-10-21 (`55a3d75`, `c524d67`): `makeExgSuite.py --relative` no longer writes an
+  empty `testcases.xml` that would replace the suite's index when the output is copied over the suite, and
+  `makeExgTwins.py` replaces twins already in a testcase file instead of adding a second set, so the suite can be
+  regenerated in place.
 
-## Bringing a pull onto SEC's branch
+**How the two recombine.** `exg-next-required-context` is the 23 required-context commits of the earlier Pull 1
+replayed onto `exg-26.4-message-codes`, plus one commit (`55bd833`) that restores the combined order of parameters
+and imports. Its tree equals the earlier, fully tested Pull 2 (`7d9b056d`) plus the two tool fixes, and nothing else.
+
+## Bringing the pulls onto SEC's branch
 
 Fetch the fork, then rebase onto SEC's base. For SEC's 26.3 the base is the commit equivalent to `4891c4c`. For the
 26.4 work in progress it is that branch's head.
@@ -36,14 +54,18 @@ Fetch the fork, then rebase onto SEC's base. For SEC's 26.3 the base is the comm
 ```
 git remote add hf https://github.com/hermfischer-xb/EDGAR.git     # once
 git fetch hf
+
+# 26.4
+git switch -c exg-message-codes hf/exg-26.4-message-codes
+git rebase --onto <SEC base> 4891c4c exg-message-codes
+
+# later sprint, on top of the message codes as merged
+git switch -c exg-required-context hf/exg-next-required-context
+git rebase --onto <SEC branch holding the message codes> hf/exg-26.4-message-codes exg-required-context
+
+# separately, if wanted
 git switch -c exg-dqc-removal hf/hf-exg-dqc-removal
 git rebase --onto <SEC base> 4891c4c exg-dqc-removal
-
-git switch -c exg-pull1 hf/exg-26.4-pull1-required-context
-git rebase --onto <SEC base> 4891c4c exg-pull1
-
-git switch -c exg-pull2 hf/exg-26.4-pull2-message-codes
-git rebase --onto exg-pull1 hf/exg-26.4-pull1-required-context exg-pull2   # Pull 2 on top of the rebased Pull 1
 ```
 
 **Line endings.** SEC's GitHub requires CR/LF line endings. Public 26.3 and these branches store their files with LF,
@@ -56,17 +78,12 @@ endings alone. So:
 The one exception is `validate/resources/exg/build/build.sh`: a shell script with CR/LF does not run under a Unix
 shell, so keep it LF (`*.sh text eol=lf`) or run it through `dos2unix` before use.
 
-**Conflicts inside the series are already resolved** on these branches:
-- the fee-exhibit anchor against step 4b, in `Filing.py`: fee exhibits take `selectFeeExhibitRequiredContext`, and
-  everything else takes `selectRequiredContext` with the step 4b restriction;
-- the `Util.py` imports where the references commit meets the DQC lines.
-
-Conflicts left to expect are only where SEC's own 26.4 changes touch the same places, most likely:
-- `validate/Filing.py`: the required-context block in `validateFiling`, and the message-formatting block in
-  `sevMessage` (Pull 2);
+Conflicts to expect are only where SEC's own 26.4 changes touch the same places, most likely:
+- `validate/Filing.py`: the message-formatting block in `sevMessage`, and, for the required-context pull, the
+  required-context block in `validateFiling`;
 - `validate/__init__.py`: the parameter list and its documentation at the head of the file;
-- `validate/resources/dei-validations.json`, which the EDGAR team edits each release. Pull 2 changes only the
-  comment that documents `msgSection`; no entry is changed;
+- `validate/resources/dei-validations.json`, which the EDGAR team edits each release. The message-codes pull changes
+  only the comment that documents `msgSection`; no entry is changed;
 - `validate/Consts.py`.
 
 When resolving, keep SEC's changes and add these pulls' changes beside them. If a conflict is not clear, stop and ask
@@ -75,34 +92,78 @@ the developer; do not guess.
 ## Checking the result
 
 1. **Against the reference trees, when the base is 26.3 itself.** After rebasing onto `4891c4c` with no other
-   changes, the trees must be exactly:
-   - Pull 1 and Pull 2: the trees in the table of branch heads above.
-
-   On another base, compare `git diff <SEC base> exg-pullN` with `git diff 4891c4c hf/<branch>`: the differences
-   should be only SEC's own changes.
-2. **The EFM conformance suite** (efm-78-260914 or SEC's current suite). On the fork, each pull gives identical
-   status and message codes to the fork's integration branch on all 8,582 variations; the DQC removal does too.
-   - Pull 2 in its default mode (`messageCodes` absent, so `EFM`) changes no code.
+   changes, the trees must be exactly those in the table of branch heads above. On another base, compare
+   `git diff <SEC base> exg-message-codes` with `git diff 4891c4c hf/exg-26.4-message-codes`: the differences should
+   be only SEC's own changes.
+2. **The EFM conformance suite** (efm-78-260914 or SEC's current suite), for the message-codes pull:
+   - **Default mode (`messageCodes` absent, so `EFM`) is 26.3's behaviour.** On the fork, every variation of
+     efm-78-260914 gives the same status and message codes as 26.3.
+   - **With the twins** (`suite/codes-suite.zip`, see [SUITE-TWINS-HANDOFF.md](SUITE-TWINS-HANDOFF.md)):
+     every original variation gives the same status and codes as without the twins, and 2,769 of the
+     2,770 twins pass. The exception is `605-40` man `_102gw-exg`, an order effect in the suite (in an in-order run its
+     original raises a 3.1.11 message; run alone it raises a WKSI header-value message with no EXG reference), as on
+     the earlier Pull 2.
    - Any difference after rebasing comes from the interaction with SEC's changes and should be looked at.
-3. **Unit tests**, in this handoff branch's `exg-26.4-handoff/tests/` folder. They have no Arelle imports except where noted. Each takes the plugin directory
-   as its argument, except where noted. All pass on both pulls:
+3. **Unit tests**, in this handoff branch's `exg-26.4-handoff/tests/` folder. Each takes the plugin directory as its
+   argument.
 
    ```
-   # Pull 1 and Pull 2: the required context and instance types
+   # 26.4 message codes (and again after the required-context pull)
+   python3 exg-26.4-handoff/tests/test_message_references.py <plugin dir>          # needs Arelle's Python, for regex
+   python3 exg-26.4-handoff/tests/test_instance_types.py <plugin dir>              # Tables 6-1 to 6-4, scope cells
+
+   # required context (later sprint)
    python3 exg-26.4-handoff/tests/test_select_required_context.py <plugin dir>     # the ordering, steps 1 to 8
    python3 exg-26.4-handoff/tests/test_fee_exhibit_anchor.py <plugin dir>          # fee exhibits: the anchor facts
    python3 exg-26.4-handoff/tests/test_step4_submission_sets.py <plugin dir>       # step 4's submission sets
    python3 exg-26.4-handoff/tests/test_modeldocument_guard.py <plugin dir>         # an instance that did not load
-   python3 exg-26.4-handoff/tests/test_instance_types.py <plugin dir>              # Tables 6-1 to 6-4, scope cells
    (cd <Arelle worktree root> && python3 <path>/exg-26.4-handoff/tests/test_document_period_end_date_required.py .)
                                                                                     # step 4b; needs Arelle importable
-   # Pull 2: message references and codes
-   python3 exg-26.4-handoff/tests/test_message_references.py <plugin dir>          # needs Arelle's Python, for regex
    ```
 
-   Whether these tests move into the plugin repository is the EDGAR team's decision.
+   On the fork, the first two pass on `exg-26.4-message-codes`, and all seven pass on `exg-next-required-context`
+   (as they did on the earlier Pull 2, whose tree it reproduces). Whether these tests move into the plugin repository
+   is the EDGAR team's decision.
 
-## Pull 1: required context
+## What EXG mode means without the required context
+
+In EXG mode a message carries the EXG section that states the same check, but until the required-context pull lands,
+the context the check binds to is still chosen as in 26.3. Where 26.3's choice and the EXG ordering differ, an
+EXG-coded message reflects 26.3's choice. On nine months of EDGAR XBRL feeds (December 2025 to August 2026), the
+required-context change altered the messages of 9,166 of 140,942 filings (6.5%), mostly by adding EFM 6.5.19 (see
+"Required context" below). Those are the filings where EXG-mode results in 26.4 will differ from those after the
+required-context pull.
+
+## Earlier branches (reference only)
+
+`exg-26.4-pull1-required-context` (`68541d2`) and `exg-26.4-pull2-message-codes` (`5c290dd`, which contained Pull 1)
+stay on the fork as they were handed over on 2026-10-11, with `suite/pull1-suite.zip` and `suite/pull2-suite.zip`.
+Use the branches above instead.
+
+## 26.4: EXG message codes (`exg-26.4-message-codes`)
+
+- **Every message from a table-driven check carries its references as arguments:** `efmSection`, and `exgSection`
+  where it has an EXG reference. An entry may carry both `efm` and `msgSection`.
+- **`messageCodes` chooses which guide forms the code**, as a list in priority order. The default is `EFM`, which
+  changes no code. Within EDGAR, pass `messageCodes=EXG` for EXG codes: a check without an EXG reference falls
+  back to its EFM code. Listing two guides (`EXG EFM`) also adds `efmCode` and `exgCode` arguments, for comparing
+  runs. Going back to EFM codes is a parameter change, not a code change.
+- **EXG references for the legacy checks** that carry only an EFM reference are in
+  `validate/resources/efm-exg-references.json`: 307 references, reviewed, read at run time.
+  - `dei-validations.json` is not edited.
+  - No EFM code is created.
+  - The file is also meant to be published for filing preparers and consumers of disseminated filings who meet EXG
+    codes for the first time.
+- **Numeric IDs for EXG codes** use a provisional range, base 100,000,000, encoded from the EXG section left-aligned.
+  It is one constant, `exgStart`, in `validate/MessageNumericId.py`, and is documented there for review.
+- **Fee-exhibit codes** (`ft.` in `ft-validations.json`) are unchanged.
+- **Maintenance** of the EXG resources (a new Word draft of the guide, a requirements change, an urgent fix) is
+  described in `validate/resources/exg/handoffs/README.md`. The build scripts are in `validate/resources/exg/build/`
+  and the analysis tools in `validate/tools/`.
+- **The dual-coded conformance suite** is a separate handoff: [SUITE-TWINS-HANDOFF.md](SUITE-TWINS-HANDOFF.md), with
+  `suite/codes-suite.zip`.
+
+## Next sprint: required context (`exg-next-required-context`)
 
 **Reading the history.** Some commits are kept because they record how the series developed, though later ones
 supersede them:
@@ -111,10 +172,13 @@ supersede them:
 - `37f9441`, `9e354bb` and `b71cbd2` add a log-only "cover-anchored" comparison selection (parameter
   `requiredContextShadow`) for batch analysis. It affects no validation.
 
-Squash these if the team prefers a shorter history; the reference tree is the same either way.
+Squash these if the team prefers a shorter history; the reference tree is the same either way. On
+`exg-next-required-context` they carry new commit ids, followed by `55bd833`.
 
 **Its conformance-suite changes** are delivered as `suite/pull1-suite.zip` on this handoff branch, with its own README:
 17 variations the ordering turns into errors are corrected, with corrected copies, and one 605-19 variation is fixed.
+In the later sprint they go onto a suite that already has the 26.4 twins: see SUITE-TWINS-HANDOFF.md, "After the
+required-context pull".
 
 ### What changes in behaviour
 
@@ -173,7 +237,8 @@ both 26.3 and these changes:
 These consequences have been reported to the EXG author. The decision for 26.4 is to ship the check as the guide
 writes it and let the filer community assess it during the preview period.
 
-**5. EXG instance types are resolved for every instance**, in `validate/InstanceTypes.py`.
+**5. EXG instance types are resolved for every instance**, in `validate/InstanceTypes.py` (already present, unused,
+since the 26.4 message-codes pull; this pull calls it).
 - **The tables are data:** `validate/resources/exg-set-definitions.json` holds EXG 1.1 "Set Definitions",
   Tables 6-1 to 6-4, generated from the guide's Word source. Do not edit it by hand; regenerate it for each
   edition of the guide.
@@ -220,29 +285,6 @@ pre-submission validation and downstream users get the closest answer available.
 - EXG's "Exhibit Type" is matched against `attachmentDocumentType` (an EDGAR document type), not against the
   `exhibitType` parameter.
 
-
-## Pull 2: EXG message codes
-
-- **Every message from a table-driven check carries its references as arguments:** `efmSection`, and `exgSection`
-  where it has an EXG reference. An entry may carry both `efm` and `msgSection`.
-- **`messageCodes` chooses which guide forms the code**, as a list in priority order. The default is `EFM`, which
-  changes no code. Within EDGAR, pass `messageCodes=EXG` for EXG codes: a check without an EXG reference falls
-  back to its EFM code. Listing two guides (`EXG EFM`) also adds `efmCode` and `exgCode` arguments, for comparing
-  runs. Going back to EFM codes is a parameter change, not a code change.
-- **EXG references for the legacy checks** that carry only an EFM reference are in
-  `validate/resources/efm-exg-references.json`: 307 references, reviewed, read at run time.
-  - `dei-validations.json` is not edited.
-  - No EFM code is created.
-  - The file is also meant to be published for filing preparers and consumers of disseminated filings who meet EXG
-    codes for the first time.
-- **Numeric IDs for EXG codes** use a provisional range, base 100,000,000, encoded from the EXG section left-aligned.
-  It is one constant, `exgStart`, in `validate/MessageNumericId.py`, and is documented there for review.
-- **Fee-exhibit codes** (`ft.` in `ft-validations.json`) are unchanged.
-- **Maintenance** of the EXG resources (a new Word draft of the guide, a requirements change, an urgent fix) is
-  described in `validate/resources/exg/handoffs/README.md`. The build scripts are in `validate/resources/exg/build/`
-  and the analysis tools in `validate/tools/`.
-- **The dual-coded conformance suite** is a separate handoff: [SUITE-TWINS-HANDOFF.md](SUITE-TWINS-HANDOFF.md), with
-  `suite/pull2-suite.zip`.
 
 ## Not in these pulls
 
