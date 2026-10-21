@@ -12,6 +12,9 @@ prefix).  The EXG section comes either
 When the source gives no section, or more than one, the variation gets no twin and is reported.  An assert that already expects
 an EXG code, or names no mapped concept, gets no twin either; the run shows those as EFM-coded in EXG mode.
 
+Twins already in the file (ids ending "-exg") are removed first and made again, so regenerating a suite that already
+has twins, for example after the references change, replaces them rather than adding a second set.
+
 The original variations are kept unchanged, so one run checks both modes.  The output can be written beside the
 original (same relative instance paths) or elsewhere with --absolute, which rewrites data URIs to absolute paths.
 
@@ -67,6 +70,13 @@ def restoreNamespaceDeclarations(originalPath, outPath):
             fh.write(text)
 
 
+def removeTwinsAsText(text):
+    """The testcase file's text without the twins insertTwinsAsText added: each twin with the line break and
+    indentation inserted before it, so the original text comes back exactly."""
+    return re.sub(r'\r?\n[ \t]*<(?P<p>\w+:)?variation\b[^>]*\bid="[^"]+-exg"[^>]*>.*?</(?P=p)?variation>', "", text,
+                  flags=re.S)
+
+
 def insertTwinsAsText(text, twins):
     """The testcase file's own text with a twin of each listed variation inserted after it, so that a merge into the
     suite source shows only added lines.  twins: [(variation id, EXG code prefix)]."""
@@ -119,6 +129,9 @@ def main(testcasePath, referencesPath, outPath, absolute=False, observed=None):
     root = tree.getroot()
     base = os.path.dirname(os.path.abspath(testcasePath))
     made, skipped, twins = 0, [], []
+    for v in list(root):  # twins of an earlier run are made again below
+        if v.tag.split("}")[-1] == "variation" and (v.get("id") or "").endswith("-exg"):
+            root.remove(v)
     children = list(root)
     for v in children:
         if v.tag.split("}")[-1] != "variation":  # EDGAR's conformance namespace, or XBRL's (the fee testcases)
@@ -174,7 +187,7 @@ def main(testcasePath, referencesPath, outPath, absolute=False, observed=None):
         with open(testcasePath, encoding="utf-8", newline="") as fh:  # keep the file's own line endings
             original = fh.read()
         with open(outPath, "w", encoding="utf-8", newline="") as fh:
-            fh.write(insertTwinsAsText(original, twins))
+            fh.write(insertTwinsAsText(removeTwinsAsText(original), twins))
     print("{}: {} twins; {} failing variations without a twin".format(os.path.basename(testcasePath), made, len(skipped)))
     for s in skipped:
         print("  no twin:", *s)
